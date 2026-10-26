@@ -12,7 +12,8 @@ whose nodes search inline keys with SIMD.
   `ReadOnlySpan<char>` in a map of strings.
 - `ConcurrentBBTreeMap<TKey, TValue, TInlineKey>` is the map that threads share. Reads take no locks: each node has
   a version, and a read validates the versions of the nodes it read (optimistic lock coupling). Writers lock only
-  the nodes they change.
+  the nodes they change. When empty leaves dominate, a removal compacts the tree under its node locks, reusing
+  surviving leaves and rebuilding routing nodes. Operations can retry or wait during this occasional maintenance.
 
 On the benchmark of the Rust crate, both maps are faster than the Rust crate in most cells; see
 [Benchmarks](#benchmarks).
@@ -146,6 +147,9 @@ The runtime changes the trade-offs that shaped the Rust design:
   to read a separator; a copy of a reference or of a small struct costs nothing here.
 - Leaves link to the next leaf, so enumeration and range scans need no stack of ancestors.
 - The concurrent map needs no epochs or free lists: a node that a reader still holds stays valid memory.
+- Concurrent removals reclaim empty leaves once at least 32 leaves are empty and they make up about half the
+  leaves, or when the tree becomes empty. Partly filled leaves remain; compaction trades occasional pauses and
+  routing-node allocations for bounded retention under churn.
 - The JIT shares one copy of generic code for all reference-type keys, where calls through the key interface become
   runtime lookups. Built-in string and byte-array keys are dispatched by type checks that the JIT folds, so their
   searches make direct calls. Their lookups run in a method of their own, which measured faster than inlined.
@@ -272,6 +276,15 @@ dotnet run -c Release --project bench/BBTreeBench -- --key u64,str-json --size 1
 Options: `--key` (`u64`, `str-json`, `bytes-json`), `--size` (`1k`, `10k`, `100k`, `1M`, `10M`), `--map` (`bbtree`,
 `bbtree-concurrent`, `sorted-dictionary`) and `--op` (`random_insert`, `get_hit`, `get_miss`, `iterate`, `range64`,
 `random_remove`). For the Rust side, run `cargo run --release -p bbtree-bench -- ci` in the bbtree repository.
+
+To measure concurrent-map churn, including allocations and managed memory retained after full collections:
+
+```
+dotnet run -c Release --project bench/BBTreeBench -- --churn --reps 5
+```
+
+This moves a 10,000-key window through 100 batches of new integer keys, then drains the map. Timings cover the
+window movements; retained memory is sampled with the final window present and again after draining.
 
 ## License
 

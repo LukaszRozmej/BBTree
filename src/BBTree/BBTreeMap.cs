@@ -256,17 +256,20 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
         }
 
         exists = false;
-        _count++;
-        _version++;
         index = ~index;
         TKey key = KeyDispatch<TQuery, TQueryKey, TKey>.ToKey(query);
         if (leaf.Count < Capacity)
         {
             NodeOps<TKey, TValue, TInlineKey>.InsertEntry(leaf, index, key, default!, inlineKey);
+            _count++;
+            _version++;
             return ref leaf.EntryAt(index).Value;
         }
 
-        return ref SplitAndInsert(leaf, index, key);
+        ref TValue added = ref SplitAndInsert(leaf, index, key);
+        _count++;
+        _version++;
+        return ref added;
     }
 
     private bool Remove<TQuery, TQueryKey>(scoped in TQuery query, [MaybeNullWhen(false)] out TValue value)
@@ -328,10 +331,11 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
 
     private ref TValue AddFirst(TKey key, out bool exists)
     {
-        _sharedKey = key;
-        _sharedLength = Math.Min(TInlineKey.Length(key), MaxSharedLength);
-        Leaf<TKey, TValue, TInlineKey> leaf = new(_sharedLength);
+        int sharedLength = Math.Min(TInlineKey.Length(key), MaxSharedLength);
+        Leaf<TKey, TValue, TInlineKey> leaf = new(sharedLength);
         NodeOps<TKey, TValue, TInlineKey>.InsertEntry(leaf, 0, key, default!);
+        _sharedKey = key;
+        _sharedLength = sharedLength;
         _root = leaf;
         _count = 1;
         _version++;
@@ -348,7 +352,6 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
     /// <summary>Shrinks the shared prefix for a key that shares less, and with it the prefix of every node on the borders of the tree.</summary>
     private void ShrinkSharedPrefix(int length)
     {
-        _sharedLength = length;
         for (Node<TKey, TInlineKey>? node = _root; node is not null; node = node.IsLeaf ? null : AsInternal(node).ChildAt(0))
         {
             if (node.PrefixLength > length) NodeSearch<TKey, TValue, TInlineKey>.SetPrefix(node, length);
@@ -358,6 +361,8 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
         {
             if (node.PrefixLength > length) NodeSearch<TKey, TValue, TInlineKey>.SetPrefix(node, length);
         }
+
+        _sharedLength = length;
     }
 
     /// <summary>Records the way down to the leaf of <paramref name="key"/>.</summary>
@@ -386,6 +391,25 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
     {
         NodePath<TKey, TInlineKey> path = default;
         int depth = Descend(key, ref path);
+        if (default(TInlineKey) is ITrustedInlineKey) return ref SplitAndInsert(leaf, index, key, ref path, depth);
+
+        Node<TKey, TInlineKey> savedLeaf = leaf.Clone();
+        PathNodes<TKey, TInlineKey> savedParents = default;
+        for (int i = 0; i < depth; i++) savedParents[i] = AsInternal(path.Nodes[i]!.Clone());
+        try
+        {
+            return ref SplitAndInsert(leaf, index, key, ref path, depth);
+        }
+        catch
+        {
+            NodeOps<TKey, TValue, TInlineKey>.Restore(leaf, savedLeaf);
+            for (int i = 0; i < depth; i++) NodeOps<TKey, TValue, TInlineKey>.Restore(path.Nodes[i]!, savedParents[i]!);
+            throw;
+        }
+    }
+
+    private ref TValue SplitAndInsert(Leaf<TKey, TValue, TInlineKey> leaf, int index, TKey key, scoped ref NodePath<TKey, TInlineKey> path, int depth)
+    {
         int split = NodeOps<TKey, TValue, TInlineKey>.SplitPoint(index);
         Leaf<TKey, TValue, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitLeaf(leaf, split);
         Leaf<TKey, TValue, TInlineKey> target = index <= split ? leaf : right;
@@ -434,6 +458,50 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
     }
 
     private void RemoveAt(Leaf<TKey, TValue, TInlineKey> leaf, int index)
+    {
+        if (default(TInlineKey) is not ITrustedInlineKey && leaf != _root && leaf.Count <= BBTreeLayout.MinNodeLength)
+        {
+            RemoveWithRollback(leaf, index);
+            return;
+        }
+
+        RemoveAtCore(leaf, index);
+    }
+
+    private void RemoveWithRollback(Leaf<TKey, TValue, TInlineKey> leaf, int index)
+    {
+        NodePath<TKey, TInlineKey> path = default;
+        int depth = Descend(leaf.EntryAt(index).Key, ref path);
+        List<(Node<TKey, TInlineKey> Node, Node<TKey, TInlineKey> Saved)> saved = new(depth * 3);
+        for (int i = 0; i < depth; i++)
+        {
+            InternalNode<TKey, TInlineKey> parent = path.Nodes[i]!;
+            int separator = path.Edges[i] > 0 ? path.Edges[i] - 1 : 0;
+            Node<TKey, TInlineKey> left = parent.ChildAt(separator);
+            Node<TKey, TInlineKey> right = parent.ChildAt(separator + 1);
+            saved.Add((parent, parent.Clone()));
+            saved.Add((left, left.Clone()));
+            saved.Add((right, right.Clone()));
+        }
+
+        Node<TKey, TInlineKey>? root = _root;
+        int count = _count;
+        int version = _version;
+        try
+        {
+            RemoveAtCore(leaf, index);
+        }
+        catch
+        {
+            foreach (var item in saved) NodeOps<TKey, TValue, TInlineKey>.Restore(item.Node, item.Saved);
+            _root = root;
+            _count = count;
+            _version = version;
+            throw;
+        }
+    }
+
+    private void RemoveAtCore(Leaf<TKey, TValue, TInlineKey> leaf, int index)
     {
         TKey key = leaf.EntryAt(index).Key;
         NodeOps<TKey, TValue, TInlineKey>.RemoveEntry(leaf, index);

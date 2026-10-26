@@ -16,7 +16,8 @@ namespace BBTree;
 /// </para>
 /// <para>
 /// A node that a reader reaches after a writer unlinked it stays valid memory, as the GC keeps it while the reader
-/// holds it; the reader validates against a version that the writer changed and restarts.
+/// holds it; the reader validates against a version that the writer changed and restarts. Compaction leaves retired
+/// nodes locked permanently, so acquiring a version from one also fails.
 /// </para>
 /// </remarks>
 internal static class NodeLatch

@@ -25,12 +25,13 @@ namespace BBTree;
 /// <para>
 /// The GC reclaims nodes: a reader that reaches a node a writer just replaced still reads valid memory, and its
 /// validation fails. A full internal node splits on the way down, so a leaf split locks only the leaf and its parent.
-/// Removals leave nodes below their minimum, as merges would lock siblings; an empty leaf still routes searches.
+/// Removals leave nodes below their minimum. When empty leaves dominate, compaction locks the tree and rebuilds it;
+/// readers retry against the replacement root.
 /// </para>
 /// <para>
 /// Enumeration copies one entry at a time under validation of its leaf: it sees each key at most once, in order, and is weakly
 /// consistent with concurrent writes. <see cref="IKeyQuery{TQuery, TKey}.Compare"/> may see keys that a writer is moving;
-/// its result is discarded then, but it must not throw.
+/// its result is discarded then. Exceptions from custom comparisons are retried a bounded number of times.
 /// </para>
 /// <para>
 /// Through <see cref="IReadOnlyDictionary{TKey, TValue}"/>, <see cref="IReadOnlyCollection{T}.Count"/> is exact only
@@ -150,7 +151,11 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
 
             if (done)
             {
-                if (removed) _count.Add(-1);
+                if (removed)
+                {
+                    _count.Add(-1);
+                    if (NeedsCompaction) TryCompact();
+                }
                 return removed;
             }
 
@@ -307,6 +312,7 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         }
         else
         {
+            if (leaf.Count == 0) Interlocked.Decrement(ref _emptyLeaves);
             NodeOps<TKey, TValue, TInlineKey>.InsertEntry(leaf, ~index, key, value, inlineKey, tag);
             added = true;
         }
@@ -338,6 +344,7 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         if (!NodeLatch.TryUpgrade(ref leaf.Version, version)) return false;
         value = leaf.EntryAt(index).Value;
         NodeOps<TKey, TValue, TInlineKey>.RemoveEntry(leaf, index);
+        if (leaf.Count == 0) Interlocked.Increment(ref _emptyLeaves);
         NodeLatch.Unlock(ref leaf.Version);
         removed = true;
         return true;
@@ -375,6 +382,7 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         {
             Leaf<TKey, TValue, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitLeaf(AsLeaf(node), split);
             Publish(parent, edge, node, right.EntryAt(0).Key, right);
+            Interlocked.Increment(ref _leaves);
         }
         else
         {
@@ -516,37 +524,6 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         }
     }
 
-    private Leaf<TKey, TValue, TInlineKey>? FirstLeaf()
-    {
-        SpinWait spin = default;
-        while (true)
-        {
-            Node<TKey, TInlineKey> node = _root;
-            if (!NodeLatch.TryRead(ref node.Version, out long version) || node != _root)
-            {
-                spin.SpinOnce(sleep1Threshold: -1);
-                continue;
-            }
-
-            bool valid = true;
-            while (!node.IsLeaf)
-            {
-                Node<TKey, TInlineKey>? child = AsInternal(node).ChildAt(0);
-                if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version))
-                {
-                    valid = false;
-                    break;
-                }
-
-                node = child;
-                version = childVersion;
-            }
-
-            if (valid) return AsLeaf(node);
-            spin.SpinOnce(sleep1Threshold: -1);
-        }
-    }
-
     /// <summary>Starts an enumeration at the first key at least <paramref name="start"/>.</summary>
     private Enumerator EnumeratorFrom(in TKey start)
     {
@@ -669,9 +646,18 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
                 else
                 {
                     Leaf<TKey, TValue, TInlineKey>? next = leaf.Next;
-                    if (NodeLatch.Validate(ref leaf.Version, _version))
+                    if (next is null)
                     {
-                        MoveTo(Enter(next, 0));
+                        if (NodeLatch.Validate(ref leaf.Version, _version))
+                        {
+                            MoveTo(default);
+                            continue;
+                        }
+                    }
+                    else if (NodeLatch.TryRead(ref next.Version, out long nextVersion) && NodeLatch.Validate(ref leaf.Version, _version))
+                    {
+                        LeafPrefetch.Start(next.Next);
+                        MoveTo(new Position(next, nextVersion, 0, Math.Clamp(next.Count, 0, Capacity)));
                         continue;
                     }
                 }
@@ -691,25 +677,55 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
             _count = position.Count;
         }
 
-        /// <summary>Starts reading <paramref name="leaf"/> at <paramref name="index"/>, under the version it has now.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Position Enter(Leaf<TKey, TValue, TInlineKey>? leaf, int index)
-        {
-            // A missing leaf has no entries, so the fast path of MoveNext reads no leaf.
-            if (leaf is null) return default;
-            LeafPrefetch.Start(leaf.Next);
-            long version;
-            SpinWait spin = default;
-            while (!NodeLatch.TryRead(ref leaf.Version, out version)) spin.SpinOnce(sleep1Threshold: -1);
-            return new Position(leaf, version, index, Math.Clamp(leaf.Count, 0, Capacity));
-        }
-
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static Position First(ConcurrentBBTreeMap<TKey, TValue, TInlineKey> map) => Enter(map.FirstLeaf(), 0);
+        private static Position First(ConcurrentBBTreeMap<TKey, TValue, TInlineKey> map)
+        {
+            SpinWait spin = default;
+            while (true)
+            {
+                Node<TKey, TInlineKey> node = map._root;
+                if (NodeLatch.TryRead(ref node.Version, out long version) && node == map._root)
+                {
+                    bool valid = true;
+                    while (!node.IsLeaf)
+                    {
+                        Node<TKey, TInlineKey>? child = AsInternal(node).ChildAt(0);
+                        if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version))
+                        {
+                            valid = false;
+                            break;
+                        }
+
+                        node = child;
+                        version = childVersion;
+                    }
+
+                    if (valid) return new Position(AsLeaf(node), version, 0, Math.Clamp(node.Count, 0, Capacity));
+                }
+
+                spin.SpinOnce(sleep1Threshold: -1);
+            }
+        }
 
         /// <summary>Finds the first key at least <paramref name="key"/>, or after it; the key shares the shared prefix.</summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static Position Find(ConcurrentBBTreeMap<TKey, TValue, TInlineKey> map, TKey key, bool after)
+        {
+            if (ComparesNeverThrow) return FindCore(map, key, after);
+            int faults = 0;
+            while (true)
+            {
+                try
+                {
+                    return FindCore(map, key, after);
+                }
+                catch when (RetryAfter(ref faults))
+                {
+                }
+            }
+        }
+
+        private static Position FindCore(ConcurrentBBTreeMap<TKey, TValue, TInlineKey> map, TKey key, bool after)
         {
             SpinWait spin = default;
             while (true)

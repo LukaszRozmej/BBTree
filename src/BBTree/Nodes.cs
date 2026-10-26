@@ -34,7 +34,7 @@ internal abstract class Node<TKey, TSlots>(bool isLeaf, int prefixLength)
     public readonly bool IsLeaf = isLeaf;
     public TSlots Slots = InlineSlots<TKey, TSlots>.Empty;
 
-    /// <summary>Copies a node so a failed custom key callback can roll back a split.</summary>
+    /// <summary>Copies a node so a failed custom key callback can roll back a structural change.</summary>
     public Node<TKey, TSlots> Clone() => (Node<TKey, TSlots>)MemberwiseClone();
 }
 

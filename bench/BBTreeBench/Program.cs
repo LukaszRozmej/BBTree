@@ -10,6 +10,13 @@ using System.Runtime;
 using System.Runtime.CompilerServices;
 using BBTree;
 
+if (args.Contains("--churn"))
+{
+    Console.WriteLine(RuntimeInformationText());
+    Churn.Run(int.Parse(Option("--reps", "5")[0]));
+    return;
+}
+
 string[] keyKinds = Option("--key", "u64,str-json");
 string[] sizes = Option("--size", "1M,10M");
 string[] maps = Option("--map", "bbtree,sorted-dictionary");

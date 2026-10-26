@@ -1,0 +1,98 @@
+BBTree review benchmark, 2026-10-26
+Baseline: 88f88f1a92c3733b8c79c060a479af1efccb095a
+Candidate: the changes accompanying this report (exception recovery and empty-leaf compaction).
+Windows x64; AMD Ryzen 7 5800X; .NET 10.0.9; AVX2; workstation GC.
+
+Method: separate processes, baseline and candidate run sequentially; five samples per cell.
+The ordinary harness warms each cell. Churn uses three complete warmup passes before five measured passes.
+The same churn harness was copied into the baseline worktree. No tests or other benchmarks ran alongside these measurements.
+These are local measurements, not statistical confidence intervals. Background machine activity was not controlled.
+
+Commands (run in both worktrees after a Release build):
+dotnet run --no-build -c Release --project bench/BBTreeBench -- --key u64,str-json --size 10k --map bbtree,bbtree-concurrent --op random_insert,get_hit,range64,random_remove --reps 5
+dotnet run --no-build -c Release --project bench/BBTreeBench -- --churn --reps 5
+
+Median ns/op (range64 is per scan of up to 64 entries). Positive change means slower:
+Cell                                                          Before     After    Change
+bbtree u64_u64_random_insert_10k                                44.0      45.3     +3.0%
+bbtree u64_u64_get_hit_10k                                      21.8      21.8     +0.0%
+bbtree u64_u64_range64_10k                                      74.1      79.8     +7.7%
+bbtree u64_u64_random_remove_10k                                44.1      44.4     +0.7%
+bbtree-concurrent u64_u64_random_insert_10k                     49.8      49.8     +0.0%
+bbtree-concurrent u64_u64_get_hit_10k                           22.7      22.8     +0.4%
+bbtree-concurrent u64_u64_range64_10k                           93.2      94.3     +1.2%
+bbtree-concurrent u64_u64_random_remove_10k                     45.6      47.5     +4.2%
+bbtree str-json_u64_random_insert_10k                           89.0      84.3     -5.3%
+bbtree str-json_u64_get_hit_10k                                 67.0      57.2    -14.6%
+bbtree str-json_u64_range64_10k                                118.3     120.8     +2.1%
+bbtree str-json_u64_random_remove_10k                           83.2      84.8     +1.9%
+bbtree-concurrent str-json_u64_random_insert_10k                97.0      90.8     -6.4%
+bbtree-concurrent str-json_u64_get_hit_10k                      61.7      63.1     +2.3%
+bbtree-concurrent str-json_u64_range64_10k                     177.6     184.2     +3.7%
+bbtree-concurrent str-json_u64_random_remove_10k                75.0      78.9     +5.2%
+
+Churn: 100 batches, a 10,000-key live window, 2,000,000 timed insert/remove operations.
+Median: 49.6 -> 46.6 ns/op (6.0% lower in this run).
+Allocated during churn: 16,600,288 -> 20,170,152 bytes (21.5% higher).
+Median retained managed memory with 10,000 live keys: 16,721,824 -> 172,272 bytes (99.0% lower).
+Median retained after draining: 16,770,976 -> 4,840 bytes (99.97% lower).
+Retained memory is the delta of GC.GetTotalMemory(true) while keeping the map alive; runtime noise is included.
+
+Interpretation: compaction bounds retention under moving-key churn and reuses surviving leaves.
+It adds routing/list allocations and occasionally locks the tree. Concurrent removal medians rose about 4-5% in the 10k cells.
+Read and scan timings are close enough to the observed run variation that no general speedup is claimed.
+These measurements do not quantify compaction tail latency, throughput with contending writers, or other key types.
+
+Raw baseline ordinary cells:
+# 10.0.9, X64, Vector512 False, Vector256 True, server GC False
+bbtree u64_u64_random_insert_10k: 44.0 ns/op (min 43.1, max 46.9; gc 0.1 ns/op, collections 1/0/0)
+bbtree u64_u64_get_hit_10k: 21.8 ns/op (min 20.2, max 22.6; gc 0.0 ns/op, collections 0/0/0)
+bbtree u64_u64_range64_10k: 74.1 ns/op (min 73.9, max 81.2; gc 0.0 ns/op, collections 0/0/0)
+bbtree u64_u64_random_remove_10k: 44.1 ns/op (min 43.2, max 46.2; gc 0.1 ns/op, collections 1/0/0)
+bbtree-concurrent u64_u64_random_insert_10k: 49.8 ns/op (min 49.4, max 52.6; gc 0.1 ns/op, collections 1/0/0)
+bbtree-concurrent u64_u64_get_hit_10k: 22.7 ns/op (min 21.9, max 23.7; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent u64_u64_range64_10k: 93.2 ns/op (min 91.3, max 97.8; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent u64_u64_random_remove_10k: 45.6 ns/op (min 44.7, max 48.3; gc 0.2 ns/op, collections 1/0/0)
+bbtree str-json_u64_random_insert_10k: 89.0 ns/op (min 83.4, max 113.5; gc 0.6 ns/op, collections 2/0/0)
+bbtree str-json_u64_get_hit_10k: 67.0 ns/op (min 57.6, max 76.9; gc 0.0 ns/op, collections 0/0/0)
+bbtree str-json_u64_range64_10k: 118.3 ns/op (min 113.5, max 125.8; gc 0.0 ns/op, collections 0/0/0)
+bbtree str-json_u64_random_remove_10k: 83.2 ns/op (min 81.9, max 85.2; gc 0.6 ns/op, collections 2/1/0)
+bbtree-concurrent str-json_u64_random_insert_10k: 97.0 ns/op (min 91.8, max 110.8; gc 0.9 ns/op, collections 2/1/0)
+bbtree-concurrent str-json_u64_get_hit_10k: 61.7 ns/op (min 60.9, max 64.5; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent str-json_u64_range64_10k: 177.6 ns/op (min 175.7, max 186.9; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent str-json_u64_random_remove_10k: 75.0 ns/op (min 72.4, max 76.0; gc 0.7 ns/op, collections 2/0/0)
+
+Raw candidate ordinary cells:
+# 10.0.9, X64, Vector512 False, Vector256 True, server GC False
+bbtree u64_u64_random_insert_10k: 45.3 ns/op (min 43.4, max 48.5; gc 0.1 ns/op, collections 1/0/0)
+bbtree u64_u64_get_hit_10k: 21.8 ns/op (min 20.4, max 23.6; gc 0.0 ns/op, collections 0/0/0)
+bbtree u64_u64_range64_10k: 79.8 ns/op (min 76.7, max 82.7; gc 0.0 ns/op, collections 0/0/0)
+bbtree u64_u64_random_remove_10k: 44.4 ns/op (min 43.0, max 54.6; gc 0.1 ns/op, collections 1/0/0)
+bbtree-concurrent u64_u64_random_insert_10k: 49.8 ns/op (min 48.7, max 51.0; gc 0.1 ns/op, collections 1/0/0)
+bbtree-concurrent u64_u64_get_hit_10k: 22.8 ns/op (min 21.9, max 24.6; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent u64_u64_range64_10k: 94.3 ns/op (min 91.4, max 97.3; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent u64_u64_random_remove_10k: 47.5 ns/op (min 46.2, max 48.8; gc 0.1 ns/op, collections 1/0/0)
+bbtree str-json_u64_random_insert_10k: 84.3 ns/op (min 82.8, max 92.2; gc 0.7 ns/op, collections 2/0/0)
+bbtree str-json_u64_get_hit_10k: 57.2 ns/op (min 55.9, max 58.5; gc 0.0 ns/op, collections 0/0/0)
+bbtree str-json_u64_range64_10k: 120.8 ns/op (min 114.6, max 126.8; gc 0.0 ns/op, collections 0/0/0)
+bbtree str-json_u64_random_remove_10k: 84.8 ns/op (min 81.6, max 85.9; gc 0.5 ns/op, collections 2/0/0)
+bbtree-concurrent str-json_u64_random_insert_10k: 90.8 ns/op (min 88.9, max 94.1; gc 0.6 ns/op, collections 2/0/0)
+bbtree-concurrent str-json_u64_get_hit_10k: 63.1 ns/op (min 58.3, max 66.1; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent str-json_u64_range64_10k: 184.2 ns/op (min 182.7, max 193.2; gc 0.0 ns/op, collections 0/0/0)
+bbtree-concurrent str-json_u64_random_remove_10k: 78.9 ns/op (min 77.5, max 81.2; gc 0.4 ns/op, collections 2/0/0)
+
+Raw baseline churn:
+# 10.0.9, X64, Vector512 False, Vector256 True, server GC False
+churn int32, live window 10000, 100 rounds: 50.5 ns/op; allocated 16600288 B; retained with 10000 keys 16721824 B; retained empty 16770976 B
+churn int32, live window 10000, 100 rounds: 50.8 ns/op; allocated 16600288 B; retained with 10000 keys 16721824 B; retained empty 16770976 B
+churn int32, live window 10000, 100 rounds: 49.4 ns/op; allocated 16600288 B; retained with 10000 keys 16721824 B; retained empty 16770976 B
+churn int32, live window 10000, 100 rounds: 49.0 ns/op; allocated 16600288 B; retained with 10000 keys 16721824 B; retained empty 16770976 B
+churn int32, live window 10000, 100 rounds: 49.6 ns/op; allocated 16600288 B; retained with 10000 keys 16721824 B; retained empty 16770976 B
+
+Raw candidate churn:
+# 10.0.9, X64, Vector512 False, Vector256 True, server GC False
+churn int32, live window 10000, 100 rounds: 46.2 ns/op; allocated 20170152 B; retained with 10000 keys 172272 B; retained empty 4840 B
+churn int32, live window 10000, 100 rounds: 46.6 ns/op; allocated 20170152 B; retained with 10000 keys 172272 B; retained empty 4840 B
+churn int32, live window 10000, 100 rounds: 48.0 ns/op; allocated 20170152 B; retained with 10000 keys 172272 B; retained empty 4840 B
+churn int32, live window 10000, 100 rounds: 49.6 ns/op; allocated 20170152 B; retained with 10000 keys 175344 B; retained empty 7912 B
+churn int32, live window 10000, 100 rounds: 46.3 ns/op; allocated 20170152 B; retained with 10000 keys 172272 B; retained empty 4840 B
