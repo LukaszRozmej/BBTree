@@ -22,6 +22,7 @@ public struct IntegerKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanag
     private ushort _slot;
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int Compare(in T x, in T y) => x.CompareTo(y);
 
     /// <inheritdoc/>
@@ -48,12 +49,9 @@ public struct IntegerKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanag
         get => Unsafe.SizeOf<T>();
     }
 
-    /// <remarks>All bits set is -1 for a signed type and the maximum for an unsigned one.</remarks>
-    private static bool IsSigned
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => T.IsNegative(T.AllBitsSet);
-    }
+    /// <summary>Whether the type is signed: all bits set is -1 for a signed type and the maximum for an unsigned one.</summary>
+    /// <remarks>A field, which optimized code reads as a constant, keeps the IL of a search short enough for the JIT to inline it.</remarks>
+    private static readonly bool IsSigned = T.IsNegative(T.AllBitsSet);
 
     /// <summary>Gets the bits of a key of at most 8 bytes, in the low bytes and zero above them, ordered as unsigned.</summary>
     /// <remarks>
@@ -63,13 +61,10 @@ public struct IntegerKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanag
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong Bits(in T key)
     {
-        ulong bits = Size switch
-        {
-            sizeof(byte) => Unsafe.As<T, byte>(ref Unsafe.AsRef(in key)),
-            sizeof(ushort) => Unsafe.As<T, ushort>(ref Unsafe.AsRef(in key)),
-            sizeof(uint) => Unsafe.As<T, uint>(ref Unsafe.AsRef(in key)),
-            _ => Unsafe.As<T, ulong>(ref Unsafe.AsRef(in key)),
-        };
+        ulong bits = Size == sizeof(ulong) ? Unsafe.As<T, ulong>(ref Unsafe.AsRef(in key))
+            : Size == sizeof(uint) ? Unsafe.As<T, uint>(ref Unsafe.AsRef(in key))
+            : Size == sizeof(ushort) ? Unsafe.As<T, ushort>(ref Unsafe.AsRef(in key))
+            : Unsafe.As<T, byte>(ref Unsafe.AsRef(in key));
 
         return IsSigned ? bits ^ (1UL << (8 * Size - 1)) : bits;
     }
@@ -109,6 +104,7 @@ public struct FloatKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
     private ushort _slot;
 
     /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int Compare(in T x, in T y) => Bits(x).CompareTo(Bits(y));
 
     /// <inheritdoc/>
@@ -134,12 +130,9 @@ public struct FloatKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong Bits(in T key)
     {
-        ulong raw = Size switch
-        {
-            sizeof(ushort) => Unsafe.As<T, ushort>(ref Unsafe.AsRef(in key)),
-            sizeof(uint) => Unsafe.As<T, uint>(ref Unsafe.AsRef(in key)),
-            _ => Unsafe.As<T, ulong>(ref Unsafe.AsRef(in key)),
-        };
+        ulong raw = Size == sizeof(ulong) ? Unsafe.As<T, ulong>(ref Unsafe.AsRef(in key))
+            : Size == sizeof(uint) ? Unsafe.As<T, uint>(ref Unsafe.AsRef(in key))
+            : Unsafe.As<T, ushort>(ref Unsafe.AsRef(in key));
 
         ulong sign = 1UL << (8 * Size - 1);
         ulong mask = ulong.MaxValue >> (64 - 8 * Size);
@@ -160,7 +153,6 @@ internal static class OrderedBits
 {
     /// <summary>Gets the bytes <c>offset..</c> of a key of <paramref name="size"/> bytes, big-endian, zero past the end.</summary>
     /// <remarks>The shift drops the bits above the key, so <paramref name="bits"/> may hold anything there.</remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ulong WindowAt(ulong bits, int size, int offset) => offset < size ? bits << (64 - 8 * size + 8 * offset) : 0;
 
     /// <summary>Gets the number of leading bytes that two keys of <paramref name="size"/> bytes share.</summary>
