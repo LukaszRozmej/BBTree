@@ -18,7 +18,7 @@
     <PackageProjectUrl>https://github.com/LukaszRozmej/BBTree</PackageProjectUrl>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <!-- The tag sets the version on release; local builds pack a preview. -->
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.1.1</VersionPrefix>
   </PropertyGroup>
 
 </Project>

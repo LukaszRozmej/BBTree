@@ -26,6 +26,16 @@ dotnet add package BBTree
 
 The package targets .NET 10. It uses AVX2 where the CPU has it, and portable vector code elsewhere.
 
+## What's new in 0.1.1
+
+- Concurrent searches and range scans preserve their position across node splits, and range searches retry transient
+  exceptions from custom comparisons.
+- Failed key conversions and custom key callbacks preserve counts and existing entries. Splits and rebalancing
+  roll back structural changes, and prefix changes publish only after the affected borders are ready.
+- Adding or removing keys invalidates a single-threaded map's previously created ranges, including before enumeration starts.
+- Concurrent maps reclaim empty leaves under churn. Compaction reuses surviving leaves, with occasional pauses and
+  additional routing-node allocations; see the measurements below.
+
 ## Use
 
 Each key type names its maps: `StringKey.Map<TValue>` is the map of `string` keys, `IntegerKey<int>.ConcurrentMap<TValue>`
@@ -266,6 +276,24 @@ Ratios below 1 mean that C# is faster; **bold** ratios mean that C# is slower.
 | random remove | 10k | 99.6 | 80.4 | 0.81 |
 | random remove | 1M | 444 | 285 | 0.64 |
 | random remove | 10M | 633 | 442 | 0.70 |
+
+### 0.1.1 churn measurements
+
+Compared with commit `88f88f1`, before empty-leaf compaction, a moving window of 10,000 integer keys produced:
+
+| Measurement | Before compaction | 0.1.1 |
+|---|---:|---:|
+| Median insert/remove time | 49.6 ns/op | 46.6 ns/op |
+| Allocated during 100 window movements | 16.60 MB | 20.17 MB |
+| Retained with 10,000 live keys | 16.72 MB | 172.27 KB |
+| Retained after draining | 16.77 MB | 4.84 KB |
+
+These are five-sample local measurements on Windows x64, Ryzen 7 5800X, .NET 10.0.9, AVX2 and workstation GC.
+Memory units are decimal; retained memory is measured after full collections while keeping the map alive.
+The workload performs two million timed operations. It retained about 99% less memory with live keys, with 21.5%
+more allocations. Separate 10,000-key random-removal cells were 4–5% slower for the concurrent map. Compaction
+tail latency and throughput with contending writers were not measured, so these results do not imply a general speedup.
+See the [commands, comparison cells and raw samples](https://github.com/LukaszRozmej/BBTree/blob/v0.1.1/bench/results/review-2026-10-26.txt).
 
 ### Run it yourself
 
