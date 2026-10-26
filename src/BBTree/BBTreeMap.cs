@@ -24,7 +24,7 @@ namespace BBTree;
 /// use <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> to share it.
 /// </para>
 /// </remarks>
-public sealed class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
+public sealed partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
     where TInlineKey : struct, IInlineKey<TKey>
 {
     private const int Capacity = BBTreeLayout.NodeCapacity;

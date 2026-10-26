@@ -56,6 +56,12 @@ Parallel.For(0, 1_000, i => shared.AddOrUpdate((ulong)i, (ulong)i * 2));
 foreach (KeyValuePair<ulong, ulong> entry in shared.EnumerateFrom(500)) Console.WriteLine(entry.Key);
 ```
 
+`BBTreeMap` implements `IDictionary<TKey, TValue>` and `IReadOnlyDictionary<TKey, TValue>`, with `Keys` and
+`Values` as read-only views in key order, so it can stand in for a `SortedDictionary`. `ConcurrentBBTreeMap`
+implements `IReadOnlyDictionary<TKey, TValue>`; there its `Count` is exact only when no write runs, and `Keys` and
+`Values` are live enumerations. The interface members forward to the methods above, which take keys by `in` and
+enumerate with struct enumerators, so use the map type itself on hot paths.
+
 The third type argument chooses how the tree orders and summarizes keys. Built-in inline keys:
 
 | Inline key | Key type | Order |

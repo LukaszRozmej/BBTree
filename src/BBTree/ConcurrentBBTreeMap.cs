@@ -28,12 +28,17 @@ namespace BBTree;
 /// Removals leave nodes below their minimum, as merges would lock siblings; an empty leaf still routes searches.
 /// </para>
 /// <para>
-/// Enumeration copies one leaf at a time under validation: it sees each key at most once, in order, and is weakly
+/// Enumeration copies one entry at a time under validation of its leaf: it sees each key at most once, in order, and is weakly
 /// consistent with concurrent writes. <see cref="IKeyQuery{TQuery, TKey}.Compare"/> may see keys that a writer is moving;
 /// its result is discarded then, but it must not throw.
 /// </para>
+/// <para>
+/// Through <see cref="IReadOnlyDictionary{TKey, TValue}"/>, <see cref="IReadOnlyCollection{T}.Count"/> is exact only
+/// when no write runs concurrently, and the keys and the values are live, weakly consistent enumerations of the map,
+/// not snapshots.
+/// </para>
 /// </remarks>
-public sealed class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
+public sealed partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
     where TInlineKey : struct, IInlineKey<TKey>
 {
     private const int Capacity = BBTreeLayout.NodeCapacity;
