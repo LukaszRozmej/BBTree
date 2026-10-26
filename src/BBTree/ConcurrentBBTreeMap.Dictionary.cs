@@ -6,7 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace BBTree;
 
-public sealed partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IReadOnlyDictionary<TKey, TValue>
+public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IReadOnlyDictionary<TKey, TValue>
 {
     TValue IReadOnlyDictionary<TKey, TValue>.this[TKey key] => this[key];
 

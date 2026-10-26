@@ -11,8 +11,8 @@ namespace BBTree;
 /// The JIT shares one copy of generic code among all reference types. There, a call through
 /// <c>IKeyQuery&lt;string, string&gt;</c> becomes <c>IKeyQuery&lt;__Canon, __Canon&gt;</c>: a runtime lookup and an
 /// indirect call that is never inlined, on every level of every search. <typeparamref name="TQueryKey"/> is a struct,
-/// so the type checks here fold at JIT time and leave a direct call for <see cref="StringInlineKey"/> and
-/// <see cref="ByteArrayInlineKey"/>. Other key types take the interface call.
+/// so the type checks here fold at JIT time and leave a direct call for <see cref="StringKey"/> and
+/// <see cref="ByteArrayKey"/>. Other key types take the interface call.
 /// </remarks>
 internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     where TQuery : allows ref struct
@@ -21,14 +21,14 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ulong WindowAt(in TQuery query, int offset)
     {
-        if (typeof(TQueryKey) == typeof(StringInlineKey))
+        if (typeof(TQueryKey) == typeof(StringKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<char>)
                 ? CharWindows.At(Unsafe.As<TQuery, ReadOnlySpan<char>>(ref Unsafe.AsRef(in query)), offset)
                 : CharWindows.At(Unsafe.As<TQuery, string>(ref Unsafe.AsRef(in query)), offset);
         }
 
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey))
+        if (typeof(TQueryKey) == typeof(ByteArrayKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<byte>)
                 ? ByteWindows.At(Unsafe.As<TQuery, ReadOnlySpan<byte>>(ref Unsafe.AsRef(in query)), offset)
@@ -41,14 +41,14 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int Compare(in TQuery query, in TKey key)
     {
-        if (typeof(TQueryKey) == typeof(StringInlineKey))
+        if (typeof(TQueryKey) == typeof(StringKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<char>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<char>>(ref Unsafe.AsRef(in query)).SequenceCompareTo(Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)))
                 : string.CompareOrdinal(Unsafe.As<TQuery, string>(ref Unsafe.AsRef(in query)), Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)));
         }
 
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey))
+        if (typeof(TQueryKey) == typeof(ByteArrayKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<byte>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<byte>>(ref Unsafe.AsRef(in query)).SequenceCompareTo(Unsafe.As<TKey, byte[]>(ref Unsafe.AsRef(in key)))
@@ -62,14 +62,14 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool AreEqual(in TQuery query, in TKey key)
     {
-        if (typeof(TQueryKey) == typeof(StringInlineKey))
+        if (typeof(TQueryKey) == typeof(StringKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<char>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<char>>(ref Unsafe.AsRef(in query)).SequenceEqual(Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)))
                 : string.Equals(Unsafe.As<TQuery, string>(ref Unsafe.AsRef(in query)), Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)));
         }
 
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey))
+        if (typeof(TQueryKey) == typeof(ByteArrayKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<byte>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<byte>>(ref Unsafe.AsRef(in query)).SequenceEqual(Unsafe.As<TKey, byte[]>(ref Unsafe.AsRef(in key)))
@@ -82,14 +82,14 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int Length(in TQuery query)
     {
-        if (typeof(TQueryKey) == typeof(StringInlineKey))
+        if (typeof(TQueryKey) == typeof(StringKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<char>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<char>>(ref Unsafe.AsRef(in query)).Length
                 : Unsafe.As<TQuery, string>(ref Unsafe.AsRef(in query)).Length;
         }
 
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey))
+        if (typeof(TQueryKey) == typeof(ByteArrayKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<byte>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<byte>>(ref Unsafe.AsRef(in query)).Length
@@ -111,8 +111,8 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool HoldsUnits(ulong inlineKey, int width)
     {
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey)) return true;
-        if (typeof(TQueryKey) != typeof(StringInlineKey)) return false;
+        if (typeof(TQueryKey) == typeof(ByteArrayKey)) return true;
+        if (typeof(TQueryKey) != typeof(StringKey)) return false;
 
         // A zero byte in the complement, within the kept bytes, is a 0xFF byte.
         ulong complement = ~inlineKey | (width == sizeof(ulong) ? 0 : ulong.MaxValue << (8 * width));
@@ -122,14 +122,14 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int CommonPrefixLength(in TQuery query, in TKey key)
     {
-        if (typeof(TQueryKey) == typeof(StringInlineKey))
+        if (typeof(TQueryKey) == typeof(StringKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<char>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<char>>(ref Unsafe.AsRef(in query)).CommonPrefixLength(Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)))
                 : Unsafe.As<TQuery, string>(ref Unsafe.AsRef(in query)).AsSpan().CommonPrefixLength(Unsafe.As<TKey, string>(ref Unsafe.AsRef(in key)));
         }
 
-        if (typeof(TQueryKey) == typeof(ByteArrayInlineKey))
+        if (typeof(TQueryKey) == typeof(ByteArrayKey))
         {
             return typeof(TQuery) == typeof(ReadOnlySpan<byte>)
                 ? Unsafe.As<TQuery, ReadOnlySpan<byte>>(ref Unsafe.AsRef(in query)).CommonPrefixLength(Unsafe.As<TKey, byte[]>(ref Unsafe.AsRef(in key)))
@@ -142,8 +142,8 @@ internal static class KeyDispatch<TQuery, TQueryKey, TKey>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static TKey ToKey(in TQuery query)
     {
-        if (typeof(TQuery) == typeof(TKey) || (!typeof(TQuery).IsValueType && typeof(TQueryKey) == typeof(StringInlineKey)) ||
-            (!typeof(TQuery).IsValueType && typeof(TQueryKey) == typeof(ByteArrayInlineKey)))
+        if (typeof(TQuery) == typeof(TKey) || (!typeof(TQuery).IsValueType && typeof(TQueryKey) == typeof(StringKey)) ||
+            (!typeof(TQuery).IsValueType && typeof(TQueryKey) == typeof(ByteArrayKey)))
         {
             return Unsafe.As<TQuery, TKey>(ref Unsafe.AsRef(in query));
         }

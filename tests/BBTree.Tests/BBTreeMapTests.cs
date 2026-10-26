@@ -16,12 +16,19 @@ public class BBTreeMapTests
     {
         switch (keys)
         {
-            case KeyKind.UInt64: RunDifferential<ulong, UInt64InlineKey>(KeySources.UInt64, Comparer<ulong>.Default, seed); break;
-            case KeyKind.Int64: RunDifferential<long, Int64InlineKey>(KeySources.Int64, Comparer<long>.Default, seed); break;
-            case KeyKind.UInt128: RunDifferential<UInt128, UInt128InlineKey>(KeySources.UInt128, Comparer<UInt128>.Default, seed); break;
-            case KeyKind.String: RunDifferential<string, StringInlineKey>(KeySources.String, StringComparer.Ordinal, seed); break;
-            case KeyKind.ByteArray: RunDifferential<byte[], ByteArrayInlineKey>(KeySources.ByteArray, KeySources.ByteArrayComparer, seed); break;
-            case KeyKind.Hash: RunDifferential<Bytes32, BytesInlineKey<Bytes32>>(KeySources.Hash, KeySources.HashComparer, seed); break;
+            case KeyKind.UInt64: RunDifferential<ulong, IntegerKey<ulong>>(KeySources.UInt64, Comparer<ulong>.Default, seed); break;
+            case KeyKind.Int64: RunDifferential<long, IntegerKey<long>>(KeySources.Int64, Comparer<long>.Default, seed); break;
+            case KeyKind.UInt128: RunDifferential<UInt128, IntegerKey<UInt128>>(KeySources.UInt128, Comparer<UInt128>.Default, seed); break;
+            case KeyKind.String: RunDifferential<string, StringKey>(KeySources.String, StringComparer.Ordinal, seed); break;
+            case KeyKind.ByteArray: RunDifferential<byte[], ByteArrayKey>(KeySources.ByteArray, KeySources.ByteArrayComparer, seed); break;
+            case KeyKind.Hash: RunDifferential<Bytes32, BytesKey<Bytes32>>(KeySources.Hash, KeySources.HashComparer, seed); break;
+            case KeyKind.Int32: RunDifferential<int, IntegerKey<int>>(KeySources.Int32, Comparer<int>.Default, seed); break;
+            case KeyKind.Int16: RunDifferential<short, IntegerKey<short>>(KeySources.Int16, Comparer<short>.Default, seed); break;
+            case KeyKind.SByte: RunDifferential<sbyte, IntegerKey<sbyte>>(KeySources.SByte, Comparer<sbyte>.Default, seed); break;
+            case KeyKind.Int128: RunDifferential<Int128, IntegerKey<Int128>>(KeySources.Int128, Comparer<Int128>.Default, seed); break;
+            case KeyKind.Double: RunDifferential<double, FloatKey<double>>(KeySources.Double, KeySources.TotalOrder, seed); break;
+            case KeyKind.Comparable: RunDifferential<Person, ComparableKey<Person>>(KeySources.Person, Comparer<Person>.Default, seed); break;
+            case KeyKind.ComparablePrefixed: RunDifferential<Person, ComparableKey<Person, PersonPrefix>>(KeySources.Person, Comparer<Person>.Default, seed); break;
         }
     }
 
@@ -29,7 +36,7 @@ public class BBTreeMapTests
     public void Keeps_order_through_monotonic_inserts_and_removals([Values] bool ascending, [Values] bool removeFromFront)
     {
         const int count = 50_000;
-        BBTreeMap<ulong, ulong, UInt64InlineKey> map = new();
+        BBTreeMap<ulong, ulong, IntegerKey<ulong>> map = new();
         for (int i = 0; i < count; i++)
         {
             ulong key = ascending ? (ulong)i : (ulong)(count - i);
@@ -55,7 +62,7 @@ public class BBTreeMapTests
     [Test]
     public void Shrinks_the_shared_prefix_for_a_key_that_shares_less()
     {
-        BBTreeMap<ulong, int, UInt64InlineKey> map = new();
+        BBTreeMap<ulong, int, IntegerKey<ulong>> map = new();
         for (int i = 0; i < 10_000; i++) map[0xFEDC_BA98_7600_0000UL + (ulong)i * 7] = i;
         Assert.That(map.SharedLength, Is.EqualTo(5));
         Check(map);
@@ -70,7 +77,7 @@ public class BBTreeMapTests
     [Test]
     public void Misses_keys_outside_the_shared_prefix()
     {
-        BBTreeMap<string, int, StringInlineKey> map = new();
+        BBTreeMap<string, int, StringKey> map = new();
         for (int i = 0; i < 1_000; i++) map[$"prefix/{i:D5}"] = i;
 
         Assert.That(map.ContainsKey("prefiy"), Is.False);
@@ -85,9 +92,9 @@ public class BBTreeMapTests
     public void Alternate_lookup_matches_lookups_by_key([Values(1, 2)] int seed)
     {
         Random random = new(seed);
-        BBTreeMap<string, int, StringInlineKey> map = new();
-        BBTreeMap<string, int, StringInlineKey>.AlternateLookup<ReadOnlySpan<char>, StringInlineKey> spans =
-            map.GetAlternateLookup<ReadOnlySpan<char>, StringInlineKey>();
+        BBTreeMap<string, int, StringKey> map = new();
+        BBTreeMap<string, int, StringKey>.AlternateLookup<ReadOnlySpan<char>, StringKey> spans =
+            map.GetAlternateLookup<ReadOnlySpan<char>, StringKey>();
         SortedDictionary<string, int> expected = new(StringComparer.Ordinal);
         for (int op = 0; op < 30_000; op++)
         {
@@ -109,15 +116,15 @@ public class BBTreeMapTests
         }
 
         Check(map, expected);
-        BBTreeMap<byte[], int, ByteArrayInlineKey> bytes = new();
-        bytes.GetAlternateLookup<ReadOnlySpan<byte>, ByteArrayInlineKey>()[[1, 2, 3]] = 7;
+        BBTreeMap<byte[], int, ByteArrayKey> bytes = new();
+        bytes.GetAlternateLookup<ReadOnlySpan<byte>, ByteArrayKey>()[[1, 2, 3]] = 7;
         Assert.That(bytes[[1, 2, 3]], Is.EqualTo(7));
     }
 
     [Test]
     public void Removes_first_entries_in_order()
     {
-        BBTreeMap<long, long, Int64InlineKey> map = new();
+        BBTreeMap<long, long, IntegerKey<long>> map = new();
         Random random = new(7);
         SortedSet<long> expected = [];
         for (int i = 0; i < 20_000; i++)
@@ -142,7 +149,7 @@ public class BBTreeMapTests
     [Test]
     public void Throws_when_changed_during_enumeration()
     {
-        BBTreeMap<ulong, ulong, UInt64InlineKey> map = new() { };
+        BBTreeMap<ulong, ulong, IntegerKey<ulong>> map = new() { };
         map[1] = 1;
         map[2] = 2;
         Assert.Throws<InvalidOperationException>(() =>
@@ -159,6 +166,13 @@ public class BBTreeMapTests
         String,
         ByteArray,
         Hash,
+        Int32,
+        Int16,
+        SByte,
+        Int128,
+        Double,
+        Comparable,
+        ComparablePrefixed,
     }
 
     private static void RunDifferential<TKey, TInlineKey>(Func<Random, TKey> nextKey, IComparer<TKey> comparer, int seed)

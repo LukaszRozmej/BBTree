@@ -14,14 +14,14 @@ public class DictionaryInterfaceTests
     [Test]
     public void Acts_like_a_sorted_dictionary_through_IDictionary([Values(1, 2, 3)] int seed)
     {
-        RunDifferential(new BBTreeMap<ulong, int, UInt64InlineKey>(), Comparer<ulong>.Default, static random => (ulong)random.Next(2_000), seed);
-        RunDifferential(new BBTreeMap<string, int, StringInlineKey>(), StringComparer.Ordinal, static random => random.Next(2_000).ToString("x"), seed);
+        RunDifferential(new BBTreeMap<ulong, int, IntegerKey<ulong>>(), Comparer<ulong>.Default, static random => (ulong)random.Next(2_000), seed);
+        RunDifferential(new BBTreeMap<string, int, StringKey>(), StringComparer.Ordinal, static random => random.Next(2_000).ToString("x"), seed);
     }
 
     [Test]
     public void Add_of_a_present_key_throws_and_keeps_the_value()
     {
-        IDictionary<ulong, int> map = new BBTreeMap<ulong, int, UInt64InlineKey> { { 1, 10 } };
+        IDictionary<ulong, int> map = new BBTreeMap<ulong, int, IntegerKey<ulong>> { { 1, 10 } };
         Assert.That(() => map.Add(1, 20), Throws.ArgumentException);
         Assert.That(() => map.Add(new KeyValuePair<ulong, int>(1, 30)), Throws.ArgumentException);
         Assert.That(map[1], Is.EqualTo(10));
@@ -30,7 +30,7 @@ public class DictionaryInterfaceTests
     [Test]
     public void Indexer_get_of_a_missing_key_throws()
     {
-        IDictionary<ulong, int> map = new BBTreeMap<ulong, int, UInt64InlineKey>();
+        IDictionary<ulong, int> map = new BBTreeMap<ulong, int, IntegerKey<ulong>>();
         IReadOnlyDictionary<ulong, int> readOnly = (IReadOnlyDictionary<ulong, int>)map;
         Assert.That(() => map[1], Throws.TypeOf<KeyNotFoundException>());
         Assert.That(() => readOnly[1], Throws.TypeOf<KeyNotFoundException>());
@@ -39,7 +39,7 @@ public class DictionaryInterfaceTests
     [Test]
     public void Pairs_match_on_key_and_value([Values] bool sameValue)
     {
-        ICollection<KeyValuePair<ulong, int>> map = new BBTreeMap<ulong, int, UInt64InlineKey> { { 1, 10 } };
+        ICollection<KeyValuePair<ulong, int>> map = new BBTreeMap<ulong, int, IntegerKey<ulong>> { { 1, 10 } };
         KeyValuePair<ulong, int> pair = new(1, sameValue ? 10 : 11);
         Assert.That(map.Contains(pair), Is.EqualTo(sameValue));
         Assert.That(map.Remove(pair), Is.EqualTo(sameValue));
@@ -49,7 +49,7 @@ public class DictionaryInterfaceTests
     [Test]
     public void CopyTo_checks_the_array([Values(-1, 4, 6)] int index)
     {
-        BBTreeMap<ulong, int, UInt64InlineKey> map = new() { { 1, 10 }, { 2, 20 } };
+        BBTreeMap<ulong, int, IntegerKey<ulong>> map = new() { { 1, 10 }, { 2, 20 } };
         ICollection<KeyValuePair<ulong, int>> entries = map;
         ICollection<ulong> keys = map.Keys;
         ICollection<int> values = map.Values;
@@ -63,7 +63,7 @@ public class DictionaryInterfaceTests
     [Test]
     public void Keys_and_values_are_read_only_views_that_follow_the_map()
     {
-        BBTreeMap<ulong, int, UInt64InlineKey> map = new() { { 2, 20 }, { 1, 10 } };
+        BBTreeMap<ulong, int, IntegerKey<ulong>> map = new() { { 2, 20 }, { 1, 10 } };
         ICollection<ulong> keys = map.Keys;
         ICollection<int> values = map.Values;
         map[3] = 30;
@@ -83,7 +83,7 @@ public class DictionaryInterfaceTests
     [Test]
     public void Concurrent_map_reads_through_IReadOnlyDictionary()
     {
-        ConcurrentBBTreeMap<ulong, int, UInt64InlineKey> concurrent = new();
+        ConcurrentBBTreeMap<ulong, int, IntegerKey<ulong>> concurrent = new();
         for (ulong key = 100; key > 0; key--) concurrent.AddOrUpdate(key, (int)key * 10);
         IReadOnlyDictionary<ulong, int> map = concurrent;
 

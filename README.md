@@ -6,7 +6,8 @@
 Fast ordered maps for .NET: a C# port of [bbtree](https://github.com/XiangpengHao/bbtree) by Xiangpeng Hao, a B+-tree
 whose nodes search inline keys with SIMD.
 
-- `BBTreeMap<TKey, TValue, TInlineKey>` is the map for one thread. It gives `ref` access to values, ordered
+- `BBTreeMap<TKey, TValue, TInlineKey>` is the map for one thread, also named by its key type, as in
+  `StringKey.Map<TValue>`. It gives `ref` access to values, ordered
   enumeration, range scans from a key, first and last entries, and lookups by an alternate key type, for example by
   `ReadOnlySpan<char>` in a map of strings.
 - `ConcurrentBBTreeMap<TKey, TValue, TInlineKey>` is the map that threads share. Reads take no locks: each node has
@@ -26,17 +27,19 @@ The package targets .NET 10. It uses AVX2 where the CPU has it, and portable vec
 
 ## Use
 
+Each key type names its maps: `StringKey.Map<TValue>` is the map of `string` keys, `IntegerKey<int>.ConcurrentMap<TValue>`
+the shared map of `int` keys.
+
 ```csharp
 using BBTree;
 
-BBTreeMap<ulong, string, UInt64InlineKey> map = new();
+IntegerKey<ulong>.Map<string> map = new() { { 7, "seven" } };
 map[42] = "answer";
-map.TryAdd(7, "seven");
 
 if (map.TryGetValue(42, out string? value)) Console.WriteLine(value);
 
 // Values by reference: no second lookup to update one.
-BBTreeMap<string, int, StringInlineKey> counts = new();
+StringKey.Map<int> counts = new();
 ref int count = ref counts.GetValueRefOrAddDefault("word", out _);
 count++;
 
@@ -46,15 +49,16 @@ foreach (KeyValuePair<ulong, string> entry in map.EnumerateFrom(10)) Console.Wri
 if (map.TryGetFirst(out ulong first, out _)) Console.WriteLine(first);
 
 // Lookups by span, with no string allocation.
-BBTreeMap<string, int, StringInlineKey>.AlternateLookup<ReadOnlySpan<char>, StringInlineKey> bySpan =
-    counts.GetAlternateLookup<ReadOnlySpan<char>, StringInlineKey>();
-bool found = bySpan.ContainsKey("word, and more".AsSpan(0, 4));
+bool found = counts.GetAlternateLookup<ReadOnlySpan<char>, StringKey>().ContainsKey("word, and more".AsSpan(0, 4));
 
 // Shared between threads.
-ConcurrentBBTreeMap<ulong, ulong, UInt64InlineKey> shared = new();
-Parallel.For(0, 1_000, i => shared.AddOrUpdate((ulong)i, (ulong)i * 2));
-foreach (KeyValuePair<ulong, ulong> entry in shared.EnumerateFrom(500)) Console.WriteLine(entry.Key);
+IntegerKey<int>.ConcurrentMap<long> shared = new();
+Parallel.For(0, 1_000, i => shared.AddOrUpdate(i, i * 2L));
+foreach (KeyValuePair<int, long> entry in shared.EnumerateFrom(500)) Console.WriteLine(entry.Key);
 ```
+
+`StringKey.Map<TValue>` is a `BBTreeMap<string, TValue, StringKey>`. Generic code over the key type takes the full
+type, whose third type argument chooses how the tree orders and summarizes keys.
 
 `BBTreeMap` implements `IDictionary<TKey, TValue>` and `IReadOnlyDictionary<TKey, TValue>`, with `Keys` and
 `Values` as read-only views in key order, so it can stand in for a `SortedDictionary`. `ConcurrentBBTreeMap`
@@ -62,26 +66,69 @@ implements `IReadOnlyDictionary<TKey, TValue>`; there its `Count` is exact only 
 `Values` are live enumerations. The interface members forward to the methods above, which take keys by `in` and
 enumerate with struct enumerators, so use the map type itself on hot paths.
 
-The third type argument chooses how the tree orders and summarizes keys. Built-in inline keys:
+### Keys
 
-| Inline key | Key type | Order |
+| Key | Key type | Order |
 |---|---|---|
-| `UInt64InlineKey` | `ulong` | numeric |
-| `Int64InlineKey` | `long` | numeric |
-| `UInt128InlineKey` | `UInt128` | numeric |
-| `BytesInlineKey<T>` | any unmanaged `T`, such as a hash | by its bytes |
-| `StringInlineKey` | `string`, or `ReadOnlySpan<char>` as an alternate key | ordinal |
-| `ByteArrayInlineKey` | `byte[]`, or `ReadOnlySpan<byte>` as an alternate key | by its bytes |
+| `IntegerKey<T>` | any integer type: `int`, `ulong`, `short`, `byte`, `Int128`, `nint`, `char`, … | numeric |
+| `FloatKey<T>` | `double`, `float`, `Half` | IEEE 754 total order (see below) |
+| `StringKey` | `string`, or `ReadOnlySpan<char>` as an alternate key | ordinal |
+| `ByteArrayKey` | `byte[]`, or `ReadOnlySpan<byte>` as an alternate key | by its bytes |
+| `BytesKey<T>` | any unmanaged `T`, such as a hash | by its bytes |
+| `ComparableKey<T>` | any `T : IComparable<T>`, such as a class of your own | `CompareTo` |
+| `ComparableKey<T, TPrefix>` | the same, with a prefix that orders like the keys | `CompareTo` |
 
-For other keys, implement `IInlineKey<TKey>`; its documentation gives the contract. A wrong implementation gives
-wrong answers, but never reads outside the map.
+`FloatKey<T>` orders `-NaN < -∞ < … < -0 < +0 < … < +∞ < +NaN`: `-0` and `+0` are two keys, as are NaNs of
+different signs or payloads. `double.NaN` has its sign bit set, so it orders first.
+
+### Keys of your own types
+
+A type that implements `IComparable<T>` is a key with `ComparableKey<T>`. Such keys give the tree no bytes to
+compare with vector instructions, so a search compares full keys, with a binary search in each node. Keys must not be
+`null`.
+
+```csharp
+public sealed record Person(string Name, int Age) : IComparable<Person>
+{
+    public int CompareTo(Person? other)
+    {
+        int byName = string.CompareOrdinal(Name, other!.Name);
+        return byName != 0 ? byName : Age.CompareTo(other.Age);
+    }
+}
+
+ComparableKey<Person>.Map<string> people = new();
+people[new Person("Ann", 42)] = "engineer";
+```
+
+To search by inline keys again, give the tree a prefix of each key that orders like the keys: if `x < y`, then
+`Of(x) <= Of(y)`. A search then compares full keys only where prefixes tie.
+
+```csharp
+/// <summary>The first 4 chars of the name, which order like the names.</summary>
+public readonly struct NamePrefix : ISortPrefix<Person>
+{
+    public static ulong Of(in Person key)
+    {
+        ulong prefix = 0;
+        for (int i = 0; i < 4 && i < key.Name.Length; i++) prefix |= (ulong)key.Name[i] << (48 - 16 * i);
+        return prefix;
+    }
+}
+
+ComparableKey<Person, NamePrefix>.Map<string> faster = new();
+```
+
+For full control, implement `IInlineKey<TKey>`, as the built-in keys do; its documentation gives the contract. A
+wrong implementation gives wrong answers, but never reads outside the map.
 
 ## How it works
 
 - **Inline keys.** Each node keeps 2, 4 or 8 bytes of each key in a dense array beside the keys. A search counts the
   inline keys below its own with vector compares and no branches, and reads full keys only where inline keys tie.
 - **Prefixes.** The inline keys skip the units (bytes, or chars of a string) that all keys of a node share, which the
-  separators beside the node bound. Integers and hashes keep 2 bytes past that prefix; strings and byte arrays 4.
+  separators beside the node bound. Numbers and hashes keep 2 bytes past that prefix, strings and byte arrays 4, and
+  keys with a sort prefix the 8 bytes of the prefix.
 - **Length tags.** Leaves of strings and byte arrays also keep the length of each key, so a lookup proves a hit from
   the inline key alone when the key ends within it.
 - **Strings.** A string window holds one byte for each of 4 chars: a char from `U+00FF` on saturates to `0xFF`, and

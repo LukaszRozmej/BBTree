@@ -10,81 +10,13 @@ using System.Runtime.Intrinsics;
 
 namespace BBTree;
 
-/// <summary>Inline keys of <see cref="ulong"/> keys: their big-endian bytes, of which the nodes keep 2.</summary>
-[InlineArray(BBTreeLayout.NodeCapacity)]
-public struct UInt64InlineKey : IInlineKey<ulong>, ITrustedInlineKey
-{
-    private ushort _slot;
-
-    /// <inheritdoc/>
-    public static int Compare(in ulong x, in ulong y) => x.CompareTo(y);
-
-    /// <inheritdoc/>
-    public static ulong WindowAt(in ulong key, int offset) => offset < sizeof(ulong) ? key << (offset * 8) : 0;
-
-    /// <inheritdoc/>
-    public static int CommonPrefixLength(in ulong x, in ulong y) => BitOperations.LeadingZeroCount(x ^ y) / 8;
-
-    /// <inheritdoc/>
-    public static int Length(in ulong key) => sizeof(ulong);
-
-    /// <inheritdoc/>
-    public static int FixedLength => sizeof(ulong);
-}
-
-/// <summary>Inline keys of <see cref="long"/> keys: the big-endian bytes with the sign bit flipped, of which the nodes keep 2.</summary>
-[InlineArray(BBTreeLayout.NodeCapacity)]
-public struct Int64InlineKey : IInlineKey<long>, ITrustedInlineKey
-{
-    private ushort _slot;
-
-    /// <inheritdoc/>
-    public static int Compare(in long x, in long y) => x.CompareTo(y);
-
-    /// <inheritdoc/>
-    public static ulong WindowAt(in long key, int offset) =>
-        offset < sizeof(long) ? ((ulong)key ^ (1UL << 63)) << (offset * 8) : 0;
-
-    /// <inheritdoc/>
-    public static int CommonPrefixLength(in long x, in long y) => BitOperations.LeadingZeroCount((ulong)(x ^ y)) / 8;
-
-    /// <inheritdoc/>
-    public static int Length(in long key) => sizeof(long);
-
-    /// <inheritdoc/>
-    public static int FixedLength => sizeof(long);
-}
-
-/// <summary>Inline keys of <see cref="UInt128"/> keys: their big-endian bytes, of which the nodes keep 2.</summary>
-[InlineArray(BBTreeLayout.NodeCapacity)]
-public struct UInt128InlineKey : IInlineKey<UInt128>, ITrustedInlineKey
-{
-    private ushort _slot;
-
-    /// <inheritdoc/>
-    public static int Compare(in UInt128 x, in UInt128 y) => x.CompareTo(y);
-
-    /// <inheritdoc/>
-    public static ulong WindowAt(in UInt128 key, int offset) =>
-        offset < 16 ? (ulong)((key << (offset * 8)) >> 64) : 0;
-
-    /// <inheritdoc/>
-    public static int CommonPrefixLength(in UInt128 x, in UInt128 y) => (int)UInt128.LeadingZeroCount(x ^ y) / 8;
-
-    /// <inheritdoc/>
-    public static int Length(in UInt128 key) => 16;
-
-    /// <inheritdoc/>
-    public static int FixedLength => 16;
-}
-
 /// <summary>
 /// Inline keys of unmanaged keys ordered by their bytes in memory, such as hashes:
 /// their bytes, of which the nodes keep 2.
 /// </summary>
 /// <remarks>The map orders the keys by their bytes, not by their <see cref="IComparable{T}"/> implementation.</remarks>
 [InlineArray(BBTreeLayout.NodeCapacity)]
-public struct BytesInlineKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
+public struct BytesKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
 {
     private ushort _slot;
 
@@ -105,12 +37,20 @@ public struct BytesInlineKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unm
 
     private static ReadOnlySpan<byte> Bytes(in T key) =>
         MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in key));
+
+    /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class Map<TValue> : BBTreeMap<T, TValue, BytesKey<T>>;
+
+    /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, BytesKey<T>>;
 }
 
 /// <summary>Inline keys of <see cref="byte"/> array keys in lexicographic order: their bytes, of which the nodes keep 4.</summary>
 /// <remarks>A map of these keys also searches by spans of bytes; see <see cref="BBTreeMap{TKey, TValue, TInlineKey}.GetAlternateLookup{TAlternate, TAlternateKey}"/>.</remarks>
 [InlineArray(BBTreeLayout.NodeCapacity + BBTreeLayout.NodeCapacity / sizeof(uint))]
-public struct ByteArrayInlineKey : IInlineKey<byte[]>, IKeyQuery<ReadOnlySpan<byte>, byte[]>, ITrustedInlineKey
+public struct ByteArrayKey : IInlineKey<byte[]>, IKeyQuery<ReadOnlySpan<byte>, byte[]>, ITrustedInlineKey
 {
     private uint _slot;
 
@@ -143,9 +83,17 @@ public struct ByteArrayInlineKey : IInlineKey<byte[]>, IKeyQuery<ReadOnlySpan<by
 
     /// <inheritdoc/>
     public static byte[] ToKey(in ReadOnlySpan<byte> query) => query.ToArray();
+
+    /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class Map<TValue> : BBTreeMap<byte[], TValue, ByteArrayKey>;
+
+    /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<byte[], TValue, ByteArrayKey>;
 }
 
-/// <summary>Inline keys of <see cref="string"/> keys in ordinal order, of which the nodes keep 8 bytes: one byte for each of 8 chars.</summary>
+/// <summary>Inline keys of <see cref="string"/> keys in ordinal order, of which the nodes keep 4 bytes: one byte for each of 4 chars.</summary>
 /// <remarks>
 /// <para>
 /// The units are chars. A window holds each char as a byte, <c>0xFF</c> for every char from <c>U+00FF</c> on, and ends
@@ -154,7 +102,7 @@ public struct ByteArrayInlineKey : IInlineKey<byte[]>, IKeyQuery<ReadOnlySpan<by
 /// <para>A map of these keys also searches by spans of chars; see <see cref="BBTreeMap{TKey, TValue, TInlineKey}.GetAlternateLookup{TAlternate, TAlternateKey}"/>.</para>
 /// </remarks>
 [InlineArray(BBTreeLayout.NodeCapacity + BBTreeLayout.NodeCapacity / sizeof(uint))]
-public struct StringInlineKey : IInlineKey<string>, IKeyQuery<ReadOnlySpan<char>, string>, ITrustedInlineKey
+public struct StringKey : IInlineKey<string>, IKeyQuery<ReadOnlySpan<char>, string>, ITrustedInlineKey
 {
     private uint _slot;
 
@@ -187,6 +135,14 @@ public struct StringInlineKey : IInlineKey<string>, IKeyQuery<ReadOnlySpan<char>
 
     /// <inheritdoc/>
     public static string ToKey(in ReadOnlySpan<char> query) => new(query);
+
+    /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class Map<TValue> : BBTreeMap<string, TValue, StringKey>;
+
+    /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<string, TValue, StringKey>;
 }
 
 internal static class CharWindows
@@ -201,7 +157,7 @@ internal static class CharWindows
     /// first char where they differ decides both, unless both saturate there, and then both windows end there alike.
     /// </para>
     /// <para>
-    /// The slots of <see cref="StringInlineKey"/> keep 4 bytes, so 4 chars fill them: one word holds the chars, and
+    /// The slots of <see cref="StringKey"/> keep 4 bytes, so 4 chars fill them: one word holds the chars, and
     /// chars below <c>U+00FF</c> narrow without vectors.
     /// </para>
     /// </remarks>

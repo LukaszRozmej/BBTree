@@ -67,12 +67,12 @@ static void RunMap<TKey>(Cells<TKey> cells, string key, string size, string map,
 
         double Cell() => (key, map) switch
         {
-            ("u64", "bbtree") => Measure<ulong, BBTreeAdapter<ulong, UInt64InlineKey>>((Cells<ulong>)(object)cells, operation, threads),
-            ("u64", "bbtree-concurrent") => Measure<ulong, ConcurrentAdapter<ulong, UInt64InlineKey>>((Cells<ulong>)(object)cells, operation, threads),
+            ("u64", "bbtree") => Measure<ulong, BBTreeAdapter<ulong, IntegerKey<ulong>>>((Cells<ulong>)(object)cells, operation, threads),
+            ("u64", "bbtree-concurrent") => Measure<ulong, ConcurrentAdapter<ulong, IntegerKey<ulong>>>((Cells<ulong>)(object)cells, operation, threads),
             ("u64", "sorted-dictionary") => Measure<ulong, SortedDictionaryAdapter<ulong>>((Cells<ulong>)(object)cells, operation, threads),
-            ("str-json", "bbtree") => Measure<string, BBTreeAdapter<string, StringInlineKey>>((Cells<string>)(object)cells, operation, threads),
-            ("str-json", "bbtree-concurrent") => Measure<string, ConcurrentAdapter<string, StringInlineKey>>((Cells<string>)(object)cells, operation, threads),
-            ("bytes-json", "bbtree") => Measure<byte[], BBTreeAdapter<byte[], ByteArrayInlineKey>>((Cells<byte[]>)(object)cells, operation, threads),
+            ("str-json", "bbtree") => Measure<string, BBTreeAdapter<string, StringKey>>((Cells<string>)(object)cells, operation, threads),
+            ("str-json", "bbtree-concurrent") => Measure<string, ConcurrentAdapter<string, StringKey>>((Cells<string>)(object)cells, operation, threads),
+            ("bytes-json", "bbtree") => Measure<byte[], BBTreeAdapter<byte[], ByteArrayKey>>((Cells<byte[]>)(object)cells, operation, threads),
             ("str-json", "sorted-dictionary") => Measure<string, SortedDictionaryAdapter<string>>((Cells<string>)(object)cells, operation, threads),
             _ => throw new ArgumentException($"{key} {map}"),
         };

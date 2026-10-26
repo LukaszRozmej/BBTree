@@ -9,6 +9,10 @@ namespace BBTree;
 /// <summary>Searches one node and keeps its inline keys in step with its prefix.</summary>
 internal static class NodeSearch<TKey, TValue, TSlots> where TSlots : struct, IInlineKey<TKey>
 {
+    /// <summary>The most tied keys that a search compares one by one; past it, a binary search compares fewer.</summary>
+    /// <remarks>Ties are rare where the inline keys summarize keys well, and all keys of a node tie where they do not.</remarks>
+    private const int LinearTies = 8;
+
     /// <summary>Finds <paramref name="query"/> in <paramref name="leaf"/>.</summary>
     /// <returns>The index of the key, or the bitwise complement of the index where it goes.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -32,6 +36,7 @@ internal static class NodeSearch<TKey, TValue, TSlots> where TSlots : struct, II
         if (InlineSlots<TKey, TSlots>.AreExact(true, prefixLength)) return less;
 
         int end = less + equal;
+        if (equal > LinearTies) return FindInTies<TQuery, TQueryKey>(leaf, query, less, end);
         for (int i = less; i < end; i++)
         {
             int comparison = KeyDispatch<TQuery, TQueryKey, TKey>.Compare(query, leaf.EntryAt(i).Key);
@@ -92,9 +97,45 @@ internal static class NodeSearch<TKey, TValue, TSlots> where TSlots : struct, II
         if (InlineSlots<TKey, TSlots>.AreExact(false, prefixLength)) return less + equal;
 
         int end = less + equal;
+        if (equal > LinearTies) return ChildInTies<TQuery, TQueryKey>(node, query, less, end);
         int index = less;
         while (index < end && KeyDispatch<TQuery, TQueryKey, TKey>.Compare(query, node.KeyAt(index)) >= 0) index++;
         return index;
+    }
+
+    /// <summary>Finds <paramref name="query"/> among the keys <c>low..high</c> of a leaf, whose inline keys tie with its own.</summary>
+    /// <returns>The index of the key, or the bitwise complement of the index where it goes.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int FindInTies<TQuery, TQueryKey>(Leaf<TKey, TValue, TSlots> leaf, in TQuery query, int low, int high)
+        where TQuery : allows ref struct
+        where TQueryKey : IKeyQuery<TQuery, TKey>
+    {
+        while (low < high)
+        {
+            int middle = (low + high) >>> 1;
+            int comparison = KeyDispatch<TQuery, TQueryKey, TKey>.Compare(query, leaf.EntryAt(middle).Key);
+            if (comparison == 0) return middle;
+            if (comparison < 0) high = middle;
+            else low = middle + 1;
+        }
+
+        return ~low;
+    }
+
+    /// <summary>Gets the first of the separators <c>low..high</c>, whose inline keys tie with the query's, that is above <paramref name="query"/>.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int ChildInTies<TQuery, TQueryKey>(InternalNode<TKey, TSlots> node, in TQuery query, int low, int high)
+        where TQuery : allows ref struct
+        where TQueryKey : IKeyQuery<TQuery, TKey>
+    {
+        while (low < high)
+        {
+            int middle = (low + high) >>> 1;
+            if (KeyDispatch<TQuery, TQueryKey, TKey>.Compare(query, node.KeyAt(middle)) >= 0) low = middle + 1;
+            else high = middle;
+        }
+
+        return low;
     }
 
     /// <summary>Gets the number of leading units that a query and a key share, at most <paramref name="limit"/>.</summary>

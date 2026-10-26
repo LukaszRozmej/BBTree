@@ -38,7 +38,7 @@ namespace BBTree;
 /// not snapshots.
 /// </para>
 /// </remarks>
-public sealed partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
+public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
     where TInlineKey : struct, IInlineKey<TKey>
 {
     private const int Capacity = BBTreeLayout.NodeCapacity;

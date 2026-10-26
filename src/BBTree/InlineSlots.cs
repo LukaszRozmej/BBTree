@@ -61,7 +61,7 @@ internal static class InlineSlots<TKey, TSlots> where TSlots : struct, IInlineKe
     private static int FixedLength
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => typeof(TSlots) == typeof(StringInlineKey) || typeof(TSlots) == typeof(ByteArrayInlineKey) ? 0 : TSlots.FixedLength;
+        get => typeof(TSlots) == typeof(StringKey) || typeof(TSlots) == typeof(ByteArrayKey) ? 0 : TSlots.FixedLength;
     }
 
     /// <summary>Whether equal inline keys at <paramref name="prefixLength"/> prove equal keys.</summary>

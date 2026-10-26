@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace BBTree;
 
-public sealed partial class BBTreeMap<TKey, TValue, TInlineKey> : IDictionary<TKey, TValue>, IReadOnlyDictionary<TKey, TValue>
+public partial class BBTreeMap<TKey, TValue, TInlineKey> : IDictionary<TKey, TValue>, IReadOnlyDictionary<TKey, TValue>
 {
     /// <summary>Gets the keys, in key order.</summary>
     public KeyCollection Keys => new(this);

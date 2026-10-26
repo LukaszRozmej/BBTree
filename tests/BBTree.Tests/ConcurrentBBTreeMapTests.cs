@@ -18,20 +18,27 @@ public class ConcurrentBBTreeMapTests
     {
         switch (keys)
         {
-            case BBTreeMapTests.KeyKind.UInt64: RunDifferential<ulong, UInt64InlineKey>(KeySources.UInt64, Comparer<ulong>.Default, seed); break;
-            case BBTreeMapTests.KeyKind.Int64: RunDifferential<long, Int64InlineKey>(KeySources.Int64, Comparer<long>.Default, seed); break;
-            case BBTreeMapTests.KeyKind.UInt128: RunDifferential<UInt128, UInt128InlineKey>(KeySources.UInt128, Comparer<UInt128>.Default, seed); break;
-            case BBTreeMapTests.KeyKind.String: RunDifferential<string, StringInlineKey>(KeySources.String, StringComparer.Ordinal, seed); break;
-            case BBTreeMapTests.KeyKind.ByteArray: RunDifferential<byte[], ByteArrayInlineKey>(KeySources.ByteArray, KeySources.ByteArrayComparer, seed); break;
-            case BBTreeMapTests.KeyKind.Hash: RunDifferential<Bytes32, BytesInlineKey<Bytes32>>(KeySources.Hash, KeySources.HashComparer, seed); break;
+            case BBTreeMapTests.KeyKind.UInt64: RunDifferential<ulong, IntegerKey<ulong>>(KeySources.UInt64, Comparer<ulong>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.Int64: RunDifferential<long, IntegerKey<long>>(KeySources.Int64, Comparer<long>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.UInt128: RunDifferential<UInt128, IntegerKey<UInt128>>(KeySources.UInt128, Comparer<UInt128>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.String: RunDifferential<string, StringKey>(KeySources.String, StringComparer.Ordinal, seed); break;
+            case BBTreeMapTests.KeyKind.ByteArray: RunDifferential<byte[], ByteArrayKey>(KeySources.ByteArray, KeySources.ByteArrayComparer, seed); break;
+            case BBTreeMapTests.KeyKind.Hash: RunDifferential<Bytes32, BytesKey<Bytes32>>(KeySources.Hash, KeySources.HashComparer, seed); break;
+            case BBTreeMapTests.KeyKind.Int32: RunDifferential<int, IntegerKey<int>>(KeySources.Int32, Comparer<int>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.Int16: RunDifferential<short, IntegerKey<short>>(KeySources.Int16, Comparer<short>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.SByte: RunDifferential<sbyte, IntegerKey<sbyte>>(KeySources.SByte, Comparer<sbyte>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.Int128: RunDifferential<Int128, IntegerKey<Int128>>(KeySources.Int128, Comparer<Int128>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.Double: RunDifferential<double, FloatKey<double>>(KeySources.Double, KeySources.TotalOrder, seed); break;
+            case BBTreeMapTests.KeyKind.Comparable: RunDifferential<Person, ComparableKey<Person>>(KeySources.Person, Comparer<Person>.Default, seed); break;
+            case BBTreeMapTests.KeyKind.ComparablePrefixed: RunDifferential<Person, ComparableKey<Person, PersonPrefix>>(KeySources.Person, Comparer<Person>.Default, seed); break;
         }
     }
 
     [Test]
     public void Keeps_every_write_of_concurrent_writers_and_readers([Values(1, 2)] int seed, [Values] bool stringKeys)
     {
-        if (stringKeys) RunConcurrent<string, StringInlineKey>(static i => $"key/{i:x}", StringComparer.Ordinal, seed);
-        else RunConcurrent<ulong, UInt64InlineKey>(static i => SplitMix(i), Comparer<ulong>.Default, seed);
+        if (stringKeys) RunConcurrent<string, StringKey>(static i => $"key/{i:x}", StringComparer.Ordinal, seed);
+        else RunConcurrent<ulong, IntegerKey<ulong>>(static i => SplitMix(i), Comparer<ulong>.Default, seed);
     }
 
     private static ulong SplitMix(ulong x)
