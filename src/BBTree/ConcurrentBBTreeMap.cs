@@ -38,6 +38,7 @@ namespace BBTree;
 /// not snapshots.
 /// </para>
 /// </remarks>
+[CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateConcurrent))]
 public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValuePair<TKey, TValue>>
     where TInlineKey : struct, IInlineKey<TKey>
 {

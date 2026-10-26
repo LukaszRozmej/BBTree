@@ -44,10 +44,12 @@ public struct ComparableKey<T> : IInlineKey<T> where T : IComparable<T>
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateComparableMap))]
     public sealed class Map<TValue> : BBTreeMap<T, TValue, ComparableKey<T>>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateComparableConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, ComparableKey<T>>;
 }
 
@@ -99,9 +101,11 @@ public struct ComparableKey<T, TPrefix> : IInlineKey<T>
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreatePrefixedMap))]
     public sealed class Map<TValue> : BBTreeMap<T, TValue, ComparableKey<T, TPrefix>>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreatePrefixedConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, ComparableKey<T, TPrefix>>;
 }

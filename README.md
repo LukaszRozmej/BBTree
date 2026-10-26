@@ -33,7 +33,7 @@ the shared map of `int` keys.
 ```csharp
 using BBTree;
 
-IntegerKey<ulong>.Map<string> map = new() { { 7, "seven" } };
+IntegerKey<ulong>.Map<string> map = [new(7, "seven"), new(9, "nine")];
 map[42] = "answer";
 
 if (map.TryGetValue(42, out string? value)) Console.WriteLine(value);
@@ -49,13 +49,17 @@ foreach (KeyValuePair<ulong, string> entry in map.EnumerateFrom(10)) Console.Wri
 if (map.TryGetFirst(out ulong first, out _)) Console.WriteLine(first);
 
 // Lookups by span, with no string allocation.
-bool found = counts.GetAlternateLookup<ReadOnlySpan<char>, StringKey>().ContainsKey("word, and more".AsSpan(0, 4));
+bool found = counts.GetSpanLookup().ContainsKey("word, and more".AsSpan(0, 4));
 
 // Shared between threads.
 IntegerKey<int>.ConcurrentMap<long> shared = new();
 Parallel.For(0, 1_000, i => shared.AddOrUpdate(i, i * 2L));
 foreach (KeyValuePair<int, long> entry in shared.EnumerateFrom(500)) Console.WriteLine(entry.Key);
 ```
+
+Collection expressions build every map type; a key that comes more than once takes its last value, as with the
+indexer. `GetSpanLookup()` searches maps of strings by `ReadOnlySpan<char>` and maps of byte arrays by
+`ReadOnlySpan<byte>`; `GetAlternateLookup<TAlternate, TAlternateKey>()` serves other query types of your own keys.
 
 `StringKey.Map<TValue>` is a `BBTreeMap<string, TValue, StringKey>`. Generic code over the key type takes the full
 type, whose third type argument chooses how the tree orders and summarizes keys.

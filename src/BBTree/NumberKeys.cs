@@ -80,10 +80,12 @@ public struct IntegerKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanag
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateIntegerMap))]
     public sealed class Map<TValue> : BBTreeMap<T, TValue, IntegerKey<T>>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateIntegerConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, IntegerKey<T>>;
 }
 
@@ -141,10 +143,12 @@ public struct FloatKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateFloatMap))]
     public sealed class Map<TValue> : BBTreeMap<T, TValue, FloatKey<T>>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateFloatConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, FloatKey<T>>;
 }
 

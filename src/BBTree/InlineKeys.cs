@@ -40,10 +40,12 @@ public struct BytesKey<T> : IInlineKey<T>, ITrustedInlineKey where T : unmanaged
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateBytesMap))]
     public sealed class Map<TValue> : BBTreeMap<T, TValue, BytesKey<T>>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateBytesConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<T, TValue, BytesKey<T>>;
 }
 
@@ -86,10 +88,12 @@ public struct ByteArrayKey : IInlineKey<byte[]>, IKeyQuery<ReadOnlySpan<byte>, b
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateByteArrayMap))]
     public sealed class Map<TValue> : BBTreeMap<byte[], TValue, ByteArrayKey>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateByteArrayConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<byte[], TValue, ByteArrayKey>;
 }
 
@@ -138,10 +142,12 @@ public struct StringKey : IInlineKey<string>, IKeyQuery<ReadOnlySpan<char>, stri
 
     /// <summary>A <see cref="BBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateStringMap))]
     public sealed class Map<TValue> : BBTreeMap<string, TValue, StringKey>;
 
     /// <summary>A <see cref="ConcurrentBBTreeMap{TKey, TValue, TInlineKey}"/> of these keys.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>
+    [CollectionBuilder(typeof(BBTreeMapBuilder), nameof(BBTreeMapBuilder.CreateStringConcurrentMap))]
     public sealed class ConcurrentMap<TValue> : ConcurrentBBTreeMap<string, TValue, StringKey>;
 }
 
