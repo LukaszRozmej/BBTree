@@ -49,7 +49,11 @@ internal static class NodeOps<TKey, TValue, TSlots> where TSlots : struct, IInli
         InsertEntry(leaf, index, key, value, InlineSlots<TKey, TSlots>.Of(true, key, leaf.PrefixLength));
 
     /// <summary>Inserts an entry whose inline key in the leaf, <paramref name="inlineKey"/>, a search already took.</summary>
-    public static void InsertEntry(Leaf<TKey, TValue, TSlots> leaf, int index, in TKey key, in TValue value, ulong inlineKey)
+    public static void InsertEntry(Leaf<TKey, TValue, TSlots> leaf, int index, in TKey key, in TValue value, ulong inlineKey) =>
+        InsertEntry(leaf, index, key, value, inlineKey, InlineSlots<TKey, TSlots>.HasTags(true) ? KeyDispatch<TKey, TSlots, TKey>.Tag(key) : (byte)0);
+
+    /// <summary>Inserts an entry with a precomputed inline key and length tag, without invoking key callbacks.</summary>
+    public static void InsertEntry(Leaf<TKey, TValue, TSlots> leaf, int index, in TKey key, in TValue value, ulong inlineKey, byte tag)
     {
         int count = leaf.Count;
         ref Entry<TKey, TValue> entry = ref Unsafe.NullRef<Entry<TKey, TValue>>();
@@ -67,7 +71,7 @@ internal static class NodeOps<TKey, TValue, TSlots> where TSlots : struct, IInli
 
         entry.Key = key;
         entry.Value = value;
-        InlineSlots<TKey, TSlots>.Insert(true, ref leaf.Slots, index, count, inlineKey, KeyDispatch<TKey, TSlots, TKey>.Tag(key));
+        InlineSlots<TKey, TSlots>.Insert(true, ref leaf.Slots, index, count, inlineKey, tag);
         leaf.Count = count + 1;
     }
 
@@ -134,13 +138,15 @@ internal static class NodeOps<TKey, TValue, TSlots> where TSlots : struct, IInli
     }
 
     /// <summary>Inserts separator <paramref name="key"/> at <paramref name="index"/> and <paramref name="child"/> right of it.</summary>
+    /// <remarks>Computes the inline key before mutation, so a key callback failure leaves the parent unchanged.</remarks>
     public static void InsertSeparator(InternalNode<TKey, TSlots> node, int index, in TKey key, Node<TKey, TSlots> child)
     {
+        ulong inlineKey = InlineSlots<TKey, TSlots>.Of(false, key, node.PrefixLength);
         int count = node.Count;
         Span<TKey> keys = node.KeySpan;
         keys.Slice(index, count - index).CopyTo(keys[(index + 1)..]);
         keys[index] = key;
-        InlineSlots<TKey, TSlots>.Insert(false, ref node.Slots, index, count, InlineSlots<TKey, TSlots>.Of(false, key, node.PrefixLength), 0);
+        InlineSlots<TKey, TSlots>.Insert(false, ref node.Slots, index, count, inlineKey, 0);
         Span<Node<TKey, TSlots>?> children = node.ChildSpan;
         children.Slice(index + 1, count - index).CopyTo(children[(index + 2)..]);
         children[index + 1] = child;
@@ -287,6 +293,29 @@ internal static class NodeOps<TKey, TValue, TSlots> where TSlots : struct, IInli
     {
         if (!Leaf<TKey, TValue, TSlots>.IsOrdered) return;
         for (int i = from; i < to; i++) leaf.OrderAt(i) = (byte)i;
+    }
+
+    /// <summary>Restores a node's contents from a copy while retaining its current lock version.</summary>
+    public static void Restore(Node<TKey, TSlots> node, Node<TKey, TSlots> saved)
+    {
+        node.Count = saved.Count;
+        node.PrefixLength = saved.PrefixLength;
+        node.Slots = saved.Slots;
+        if (node.IsLeaf)
+        {
+            Leaf<TKey, TValue, TSlots> leaf = (Leaf<TKey, TValue, TSlots>)node;
+            Leaf<TKey, TValue, TSlots> source = (Leaf<TKey, TValue, TSlots>)saved;
+            leaf.Entries = source.Entries;
+            leaf.Order = source.Order;
+            leaf.Next = source.Next;
+        }
+        else
+        {
+            InternalNode<TKey, TSlots> internalNode = (InternalNode<TKey, TSlots>)node;
+            InternalNode<TKey, TSlots> source = (InternalNode<TKey, TSlots>)saved;
+            internalNode.Keys = source.Keys;
+            internalNode.Children = source.Children;
+        }
     }
 
     private static void AppendSlots(Node<TKey, TSlots> left, int leftIndex, Node<TKey, TSlots> right, int rightCount, int prefixLength)

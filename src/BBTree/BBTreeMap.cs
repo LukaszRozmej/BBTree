@@ -600,21 +600,28 @@ public partial class BBTreeMap<TKey, TValue, TInlineKey> : IEnumerable<KeyValueP
     }
 
     /// <summary>The entries from a start key on, in key order.</summary>
+    /// <remarks>Adding or removing keys invalidates the range, including before enumeration starts.</remarks>
     public readonly struct Range : IEnumerable<KeyValuePair<TKey, TValue>>
     {
         private readonly BBTreeMap<TKey, TValue, TInlineKey> _map;
         private readonly Leaf<TKey, TValue, TInlineKey>? _leaf;
         private readonly int _index;
+        private readonly int _version;
 
         internal Range(BBTreeMap<TKey, TValue, TInlineKey> map, Leaf<TKey, TValue, TInlineKey>? leaf, int index)
         {
             _map = map;
             _leaf = leaf;
             _index = index;
+            _version = map._version;
         }
 
         /// <summary>Gets an enumerator of the entries of the range in key order.</summary>
-        public Enumerator GetEnumerator() => new(_map, _leaf, _index);
+        public Enumerator GetEnumerator()
+        {
+            if (_version != _map._version) throw new InvalidOperationException("The map changed after the range was created.");
+            return new(_map, _leaf, _index);
+        }
 
         IEnumerator<KeyValuePair<TKey, TValue>> IEnumerable<KeyValuePair<TKey, TValue>>.GetEnumerator() => new BoxedEnumerator(GetEnumerator());
 

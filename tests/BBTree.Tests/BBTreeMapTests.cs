@@ -158,6 +158,24 @@ public class BBTreeMapTests
         });
     }
 
+    [Test]
+    public void Saved_ranges_are_invalidated_before_enumeration([Values] bool clear, [Values] bool alternate)
+    {
+        StringKey.Map<int> map = [new("10", 10), new("20", 20)];
+        BBTreeMap<string, int, StringKey>.Range range = alternate
+            ? map.GetSpanLookup().EnumerateFrom("20")
+            : map.EnumerateFrom("20");
+
+        if (clear) map.Clear();
+        else map["15"] = 15;
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(() => range.GetEnumerator(), Throws.InvalidOperationException);
+            Assert.That(() => range.ToArray(), Throws.InvalidOperationException);
+        }
+    }
+
     public enum KeyKind
     {
         UInt64,

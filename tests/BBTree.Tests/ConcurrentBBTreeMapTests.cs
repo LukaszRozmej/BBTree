@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -39,6 +40,214 @@ public class ConcurrentBBTreeMapTests
     {
         if (stringKeys) RunConcurrent<string, StringKey>(static i => $"key/{i:x}", StringComparer.Ordinal, seed);
         else RunConcurrent<ulong, IntegerKey<ulong>>(static i => SplitMix(i), Comparer<ulong>.Default, seed);
+    }
+
+    [Test]
+    public async Task Splits_keep_existing_keys_reachable_and_unique()
+    {
+        const int stableKeys = 2_048;
+        const int readers = 4;
+        IntegerKey<int>.ConcurrentMap<int> map = new();
+        for (int i = 0; i < stableKeys; i++) map[i * 1_024] = i;
+
+        using Barrier start = new(readers + 1);
+        int finished = 0;
+        Task[] tasks = new Task[readers + 1];
+        tasks[0] = Task.Run(() =>
+        {
+            start.SignalAndWait();
+            try
+            {
+                for (int offset = 1; offset <= 128; offset++)
+                {
+                    for (int i = 0; i < stableKeys; i++) map.AddOrUpdate(i * 1_024 + offset, i);
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref finished, 1);
+            }
+        });
+
+        for (int reader = 0; reader < readers; reader++)
+        {
+            int owner = reader;
+            tasks[reader + 1] = Task.Run(() =>
+            {
+                start.SignalAndWait();
+                for (int operation = 0; operation < 50_000 || Volatile.Read(ref finished) == 0; operation++)
+                {
+                    int key = (operation % (stableKeys / readers) * readers + owner) * 1_024;
+                    if (map.AddOrUpdate(key, operation)) Assert.Fail($"Existing key {key} was inserted again.");
+                    if (!map.TryGetValue(key, out int value) || value != operation) Assert.Fail($"Update of key {key} was lost.");
+                    if (map.TryAdd(key, -1)) Assert.Fail($"Existing key {key} was duplicated.");
+                    if (operation % 32 == 0)
+                    {
+                        using ConcurrentBBTreeMap<int, int, IntegerKey<int>>.Enumerator entries = map.EnumerateFrom(key).GetEnumerator();
+                        if (!entries.MoveNext() || entries.Current.Key != key) Assert.Fail($"Range no longer starts at existing key {key}.");
+                    }
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(60));
+        TreeInvariants<int, int, IntegerKey<int>>.Check(map.Root, map.Count, map.SharedKey, map.SharedLength, concurrent: true);
+        Assert.That(map.Count, Is.EqualTo(stableKeys * 129));
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task Failed_split_callbacks_restore_nodes_and_release_locks([Values] SplitKind kind, [Values] bool transient)
+    {
+        ComparableKey<int, ThrowingPrefix>.ConcurrentMap<string> map = new();
+        int count = kind == SplitKind.RootLeaf ? 48 : 84;
+        for (int i = 0; i < count; i++) map[i] = i.ToString();
+
+        int separator = kind == SplitKind.RootLeaf ? 36 : 72;
+        if (kind == SplitKind.Internal)
+        {
+            while (map.Root.Count != BBTreeLayout.NodeCapacity - 1 ||
+                ((InternalNode<int, ComparableKey<int, ThrowingPrefix>>)map.Root).ChildAt(map.Root.Count).Count != BBTreeLayout.NodeCapacity)
+            {
+                map[count] = count.ToString();
+                count++;
+            }
+            separator = ((InternalNode<int, ComparableKey<int, ThrowingPrefix>>)map.Root).KeyAt(BBTreeLayout.NodeCapacity / 2);
+        }
+
+        int reordered = kind == SplitKind.Leaf ? 36 : 0;
+        Assert.That(map.TryRemove(reordered, out string? removed), Is.True);
+        Assert.That(map.TryAdd(reordered, removed!), Is.True);
+        KeyValuePair<int, string>[] before = map.ToArray();
+        ThrowingPrefix.Key = separator;
+        ThrowingPrefix.Remaining = transient ? 1 : int.MaxValue;
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (transient) Assert.That(map.TryAdd(count, count.ToString()), Is.True);
+                else Assert.That(() => map.TryAdd(count, count.ToString()), Throws.InvalidOperationException);
+
+                ThrowingPrefix.Remaining = 0;
+                if (!transient)
+                {
+                    using (Assert.EnterMultipleScope())
+                    {
+                        Assert.That(map.ToArray(), Is.EqualTo(before));
+                        Assert.That(map.Count, Is.EqualTo(count));
+                    }
+                    Assert.That(map.TryAdd(count, count.ToString()), Is.True);
+                }
+
+                TreeInvariants<int, string, ComparableKey<int, ThrowingPrefix>>.Check(map.Root, map.Count, map.SharedKey, map.SharedLength, concurrent: true);
+                using (Assert.EnterMultipleScope())
+                {
+                    Assert.That(map.Count, Is.EqualTo(count + 1));
+                    Assert.That(map[count], Is.EqualTo(count.ToString()));
+                }
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            ThrowingPrefix.Remaining = 0;
+        }
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task Failed_prefix_shrink_preserves_searches_and_releases_locks()
+    {
+        ConcurrentBBTreeMap<int, int, ThrowingInteger> map = new();
+        for (int i = 0; i < 120; i++) map[i] = i;
+        ThrowingInteger.Fail = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                Assert.That(() => map.TryAdd(int.MaxValue, -1), Throws.InvalidOperationException);
+                ThrowingInteger.Fail = false;
+                for (int i = 0; i < 120; i++) Assert.That(map[i], Is.EqualTo(i));
+                Assert.That(map.TryAdd(int.MaxValue, -1), Is.True);
+                TreeInvariants<int, int, ThrowingInteger>.Check(map.Root, map.Count, map.SharedKey, map.SharedLength, concurrent: true);
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            ThrowingInteger.Fail = false;
+        }
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task Failed_length_callback_does_not_change_or_lock_the_leaf()
+    {
+        ConcurrentBBTreeMap<int, int, ThrowingInteger> map = new();
+        map[0] = 0;
+        map[2] = 2;
+        ThrowingInteger.FailLength = true;
+        try
+        {
+            await Task.Run(() =>
+            {
+                Assert.That(() => map.TryAdd(1, 1), Throws.InvalidOperationException);
+                ThrowingInteger.FailLength = false;
+                using (Assert.EnterMultipleScope())
+                {
+                    Assert.That(map.Count, Is.EqualTo(2));
+                    Assert.That(map.ContainsKey(1), Is.False);
+                }
+                Assert.That(map.TryAdd(1, 1), Is.True);
+                TreeInvariants<int, int, ThrowingInteger>.Check(map.Root, map.Count, map.SharedKey, map.SharedLength, concurrent: true);
+                Assert.That(map.Select(static entry => entry.Key), Is.EqualTo(new[] { 0, 1, 2 }));
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            ThrowingInteger.FailLength = false;
+        }
+    }
+
+    public enum SplitKind
+    {
+        RootLeaf,
+        Leaf,
+        Internal,
+    }
+
+    private struct ThrowingPrefix : ISortPrefix<int>
+    {
+        public static int Key;
+        public static int Remaining;
+
+        public static ulong Of(in int key)
+        {
+            if (key == Key && Remaining > 0)
+            {
+                Remaining--;
+                throw new InvalidOperationException("Injected prefix failure.");
+            }
+
+            return (ulong)(uint)key << 32;
+        }
+    }
+
+    [InlineArray(BBTreeLayout.NodeCapacity + BBTreeLayout.NodeCapacity / sizeof(uint))]
+    private struct ThrowingInteger : IInlineKey<int>
+    {
+        private uint _slot;
+        public static bool Fail;
+        public static bool FailLength;
+
+        public static int Compare(in int x, in int y) => x.CompareTo(y);
+        public static int CommonPrefixLength(in int x, in int y) => IntegerKey<int>.CommonPrefixLength(x, y);
+        public static int Length(in int key) => FailLength && key == 1 ? throw new InvalidOperationException("Injected length failure.") : sizeof(int);
+        public static int FixedLength => sizeof(int);
+
+        public static ulong WindowAt(in int key, int offset)
+        {
+            if (Fail && key == 72 && offset == 0) throw new InvalidOperationException("Injected window failure.");
+            return IntegerKey<int>.WindowAt(key, offset);
+        }
     }
 
     private static ulong SplitMix(ulong x)

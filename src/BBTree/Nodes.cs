@@ -33,6 +33,9 @@ internal abstract class Node<TKey, TSlots>(bool isLeaf, int prefixLength)
     public ushort PrefixLength = (ushort)prefixLength;
     public readonly bool IsLeaf = isLeaf;
     public TSlots Slots = InlineSlots<TKey, TSlots>.Empty;
+
+    /// <summary>Copies a node so a failed custom key callback can roll back a split.</summary>
+    public Node<TKey, TSlots> Clone() => (Node<TKey, TSlots>)MemberwiseClone();
 }
 
 internal sealed class Leaf<TKey, TValue, TSlots>(int prefixLength) : Node<TKey, TSlots>(isLeaf: true, prefixLength)

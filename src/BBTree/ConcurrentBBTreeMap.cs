@@ -193,9 +193,9 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         {
             InternalNode<TKey, TInlineKey> internalNode = AsInternal(node);
             Node<TKey, TInlineKey>? child = internalNode.ChildAt(NodeSearch<TKey, TValue, TInlineKey>.ChildIndex<TKey, TInlineKey>(internalNode, key));
-            if (child is null || !NodeLatch.Validate(ref node.Version, version)) return false;
+            if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version)) return false;
             node = child;
-            if (!NodeLatch.TryRead(ref node.Version, out version)) return false;
+            version = childVersion;
         }
 
         Leaf<TKey, TValue, TInlineKey> leaf = AsLeaf(node);
@@ -281,12 +281,12 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
 
             int edge = NodeSearch<TKey, TValue, TInlineKey>.ChildIndex<TKey, TInlineKey>(internalNode, key);
             Node<TKey, TInlineKey>? child = internalNode.ChildAt(edge);
-            if (child is null || !NodeLatch.Validate(ref node.Version, version)) return false;
+            if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version)) return false;
             parent = internalNode;
             parentVersion = version;
             parentEdge = edge;
             node = child;
-            if (!NodeLatch.TryRead(ref node.Version, out version)) return false;
+            version = childVersion;
         }
 
         Leaf<TKey, TValue, TInlineKey> leaf = AsLeaf(node);
@@ -299,6 +299,7 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
             return false;
         }
 
+        byte tag = index < 0 && InlineSlots<TKey, TInlineKey>.HasTags(true) ? KeyDispatch<TKey, TInlineKey, TKey>.Tag(key) : (byte)0;
         if (!NodeLatch.TryUpgrade(ref leaf.Version, version)) return false;
         if (index >= 0)
         {
@@ -306,7 +307,7 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         }
         else
         {
-            NodeOps<TKey, TValue, TInlineKey>.InsertEntry(leaf, ~index, key, value, inlineKey);
+            NodeOps<TKey, TValue, TInlineKey>.InsertEntry(leaf, ~index, key, value, inlineKey, tag);
             added = true;
         }
 
@@ -325,9 +326,9 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         {
             InternalNode<TKey, TInlineKey> internalNode = AsInternal(node);
             Node<TKey, TInlineKey>? child = internalNode.ChildAt(NodeSearch<TKey, TValue, TInlineKey>.ChildIndex<TKey, TInlineKey>(internalNode, key));
-            if (child is null || !NodeLatch.Validate(ref node.Version, version)) return false;
+            if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version)) return false;
             node = child;
-            if (!NodeLatch.TryRead(ref node.Version, out version)) return false;
+            version = childVersion;
         }
 
         Leaf<TKey, TValue, TInlineKey> leaf = AsLeaf(node);
@@ -344,26 +345,56 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
 
     /// <summary>Splits a full internal node read under <paramref name="version"/>, locking it and its parent; does nothing if either changed.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void SplitInternal(InternalNode<TKey, TInlineKey>? parent, long parentVersion, int parentEdge, InternalNode<TKey, TInlineKey> node, long version)
-    {
-        if (!TryLockPair(parent, parentVersion, node, version)) return;
-
-        InternalNode<TKey, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitInternal(node, Capacity / 2, out TKey separator);
-        Publish(parent, parentEdge, node, separator, right);
-        NodeLatch.Unlock(ref node.Version);
-        if (parent is not null) NodeLatch.Unlock(ref parent.Version);
-    }
+    private void SplitInternal(InternalNode<TKey, TInlineKey>? parent, long parentVersion, int parentEdge, InternalNode<TKey, TInlineKey> node, long version) =>
+        SplitNode(parent, parentVersion, parentEdge, node, version, Capacity / 2);
 
     /// <summary>Splits a full leaf read under <paramref name="version"/> for an insertion at <paramref name="index"/>, locking it and its parent.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void SplitLeaf(InternalNode<TKey, TInlineKey>? parent, long parentVersion, int parentEdge, Leaf<TKey, TValue, TInlineKey> leaf, long version, int index)
-    {
-        if (!TryLockPair(parent, parentVersion, leaf, version)) return;
+    private void SplitLeaf(InternalNode<TKey, TInlineKey>? parent, long parentVersion, int parentEdge, Leaf<TKey, TValue, TInlineKey> leaf, long version, int index) =>
+        SplitNode(parent, parentVersion, parentEdge, leaf, version, NodeOps<TKey, TValue, TInlineKey>.SplitPoint(index));
 
-        Leaf<TKey, TValue, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitLeaf(leaf, NodeOps<TKey, TValue, TInlineKey>.SplitPoint(index));
-        Publish(parent, parentEdge, leaf, right.EntryAt(0).Key, right);
-        NodeLatch.Unlock(ref leaf.Version);
-        if (parent is not null) NodeLatch.Unlock(ref parent.Version);
+    private void SplitNode(InternalNode<TKey, TInlineKey>? parent, long parentVersion, int parentEdge, Node<TKey, TInlineKey> node, long version, int split)
+    {
+        if (!TryLockPair(parent, parentVersion, node, version)) return;
+
+        try
+        {
+            if (ComparesNeverThrow) SplitAndPublish(parent, parentEdge, node, split);
+            else SplitWithRollback(parent, parentEdge, node, split);
+        }
+        finally
+        {
+            NodeLatch.Unlock(ref node.Version);
+            if (parent is not null) NodeLatch.Unlock(ref parent.Version);
+        }
+    }
+
+    private void SplitAndPublish(InternalNode<TKey, TInlineKey>? parent, int edge, Node<TKey, TInlineKey> node, int split)
+    {
+        if (node.IsLeaf)
+        {
+            Leaf<TKey, TValue, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitLeaf(AsLeaf(node), split);
+            Publish(parent, edge, node, right.EntryAt(0).Key, right);
+        }
+        else
+        {
+            InternalNode<TKey, TInlineKey> right = NodeOps<TKey, TValue, TInlineKey>.SplitInternal(AsInternal(node), split, out TKey separator);
+            Publish(parent, edge, node, separator, right);
+        }
+    }
+
+    private void SplitWithRollback(InternalNode<TKey, TInlineKey>? parent, int edge, Node<TKey, TInlineKey> node, int split)
+    {
+        Node<TKey, TInlineKey> savedNode = node.Clone();
+        try
+        {
+            SplitAndPublish(parent, edge, node, split);
+        }
+        catch
+        {
+            NodeOps<TKey, TValue, TInlineKey>.Restore(node, savedNode);
+            throw;
+        }
     }
 
     /// <summary>Locks a node and its parent, both read under the given versions; the root has no parent and must still be the root.</summary>
@@ -440,10 +471,16 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
             if (length >= shared.Length) return;
 
             _shrinkingTo = length;
-            FitBorder(length, left: true);
-            FitBorder(length, left: false);
-            _shared = new SharedPrefix(shared.Key, length);
-            _shrinkingTo = int.MaxValue;
+            try
+            {
+                FitBorder(length, left: true);
+                FitBorder(length, left: false);
+                _shared = new SharedPrefix(shared.Key, length);
+            }
+            finally
+            {
+                _shrinkingTo = int.MaxValue;
+            }
         }
     }
 
@@ -459,19 +496,22 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
                 continue;
             }
 
-            while (true)
+            try
             {
-                if (node.PrefixLength > length) NodeSearch<TKey, TValue, TInlineKey>.SetPrefix(node, length);
-                if (node.IsLeaf)
+                while (true)
                 {
-                    NodeLatch.Unlock(ref node.Version);
-                    return;
-                }
+                    if (node.PrefixLength > length) NodeSearch<TKey, TValue, TInlineKey>.SetPrefix(node, length);
+                    if (node.IsLeaf) return;
 
-                Node<TKey, TInlineKey> child = AsInternal(node).ChildAt(left ? 0 : node.Count);
-                NodeLatch.Lock(ref child.Version);
+                    Node<TKey, TInlineKey> child = AsInternal(node).ChildAt(left ? 0 : node.Count);
+                    NodeLatch.Lock(ref child.Version);
+                    NodeLatch.Unlock(ref node.Version);
+                    node = child;
+                }
+            }
+            finally
+            {
                 NodeLatch.Unlock(ref node.Version);
-                node = child;
             }
         }
     }
@@ -492,13 +532,14 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
             while (!node.IsLeaf)
             {
                 Node<TKey, TInlineKey>? child = AsInternal(node).ChildAt(0);
-                if (child is null || !NodeLatch.Validate(ref node.Version, version) || !NodeLatch.TryRead(ref child.Version, out version))
+                if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version))
                 {
                     valid = false;
                     break;
                 }
 
                 node = child;
+                version = childVersion;
             }
 
             if (valid) return AsLeaf(node);
@@ -517,37 +558,6 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         }
 
         return new Enumerator(this, hasStart: true, start, empty: false);
-    }
-
-    /// <summary>Finds the leaf that holds <paramref name="start"/> or would; the start shares the shared prefix.</summary>
-    private Leaf<TKey, TValue, TInlineKey> LeafOf(in TKey start)
-    {
-
-        SpinWait spin = default;
-        while (true)
-        {
-            Node<TKey, TInlineKey> node = _root;
-            if (NodeLatch.TryRead(ref node.Version, out long version) && node == _root)
-            {
-                bool valid = true;
-                while (!node.IsLeaf)
-                {
-                    InternalNode<TKey, TInlineKey> internalNode = AsInternal(node);
-                    Node<TKey, TInlineKey>? child = internalNode.ChildAt(NodeSearch<TKey, TValue, TInlineKey>.ChildIndex<TKey, TInlineKey>(internalNode, start));
-                    if (child is null || !NodeLatch.Validate(ref node.Version, version) || !NodeLatch.TryRead(ref child.Version, out version))
-                    {
-                        valid = false;
-                        break;
-                    }
-
-                    node = child;
-                }
-
-                if (valid) return AsLeaf(node);
-            }
-
-            spin.SpinOnce(sleep1Threshold: -1);
-        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -701,13 +711,39 @@ public partial class ConcurrentBBTreeMap<TKey, TValue, TInlineKey> : IEnumerable
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static Position Find(ConcurrentBBTreeMap<TKey, TValue, TInlineKey> map, TKey key, bool after)
         {
+            SpinWait spin = default;
             while (true)
             {
-                Position position = Enter(map.LeafOf(key), 0);
-                Leaf<TKey, TValue, TInlineKey> leaf = position.Leaf!;
-                int index = NodeSearch<TKey, TValue, TInlineKey>.Find<TKey, TInlineKey>(leaf, key);
-                int start = Math.Min(index >= 0 ? (after ? index + 1 : index) : ~index, position.Count);
-                if (NodeLatch.Validate(ref leaf.Version, position.Version)) return position with { Index = start };
+                Node<TKey, TInlineKey> node = map._root;
+                if (NodeLatch.TryRead(ref node.Version, out long version) && node == map._root)
+                {
+                    bool valid = true;
+                    while (!node.IsLeaf)
+                    {
+                        InternalNode<TKey, TInlineKey> internalNode = AsInternal(node);
+                        Node<TKey, TInlineKey>? child = internalNode.ChildAt(NodeSearch<TKey, TValue, TInlineKey>.ChildIndex<TKey, TInlineKey>(internalNode, key));
+                        if (child is null || !NodeLatch.TryRead(ref child.Version, out long childVersion) || !NodeLatch.Validate(ref node.Version, version))
+                        {
+                            valid = false;
+                            break;
+                        }
+
+                        node = child;
+                        version = childVersion;
+                    }
+
+                    if (valid)
+                    {
+                        Leaf<TKey, TValue, TInlineKey> leaf = AsLeaf(node);
+                        LeafPrefetch.Start(leaf.Next);
+                        int count = Math.Clamp(leaf.Count, 0, Capacity);
+                        int index = NodeSearch<TKey, TValue, TInlineKey>.Find<TKey, TInlineKey>(leaf, key);
+                        int start = Math.Min(index >= 0 ? (after ? index + 1 : index) : ~index, count);
+                        if (NodeLatch.Validate(ref leaf.Version, version)) return new Position(leaf, version, start, count);
+                    }
+                }
+
+                spin.SpinOnce(sleep1Threshold: -1);
             }
         }
 

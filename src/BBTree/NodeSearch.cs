@@ -158,11 +158,13 @@ internal static class NodeSearch<TKey, TValue, TSlots> where TSlots : struct, II
     public static void SetPrefix(Node<TKey, TSlots> node, int prefixLength)
     {
         if (node.PrefixLength == prefixLength) return;
+        TSlots slots = node.Slots;
         for (int i = 0; i < node.Count; i++)
         {
-            InlineSlots<TKey, TSlots>.Set(node.IsLeaf, ref node.Slots, i, InlineSlots<TKey, TSlots>.Of(node.IsLeaf, KeyAt(node, i), prefixLength));
+            InlineSlots<TKey, TSlots>.Set(node.IsLeaf, ref slots, i, InlineSlots<TKey, TSlots>.Of(node.IsLeaf, KeyAt(node, i), prefixLength));
         }
 
+        node.Slots = slots;
         node.PrefixLength = (ushort)prefixLength;
     }
 
