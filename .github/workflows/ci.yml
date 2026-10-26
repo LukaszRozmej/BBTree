@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: dotnet build BBTree.slnx -c Release
+      - name: Test
+        run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+      - name: Check format
+        run: dotnet format whitespace BBTree.slnx --verify-no-changes
+      - name: Pack
+        run: dotnet pack src/BBTree -c Release --no-build

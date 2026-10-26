@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BBTree/BBTree.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BBTree.Tests/BBTree.Tests.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/BBTreeBench/BBTreeBench.csproj" />
+  </Folder>
+</Solution>
