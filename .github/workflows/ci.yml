@@ -22,8 +22,17 @@ jobs:
           global-json-file: global.json
       - name: Build
         run: dotnet build BBTree.slnx -c Release
+      - name: Report AVX-512
+        if: runner.os == 'Linux'
+        run: grep -q avx512f /proc/cpuinfo && echo "AVX-512: yes, the default run takes the 512-bit paths" || echo "AVX-512: no"
       - name: Test
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+      - name: Test without AVX-512
+        if: runner.arch == 'X64'
+        run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+        env:
+          DOTNET_TieredCompilation: 0
+          DOTNET_EnableAVX512F: 0
       # Fully optimized code without the vector paths the default run takes: emulated vectors and 128-bit-only hardware.
       - name: Test without hardware intrinsics
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
