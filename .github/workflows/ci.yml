@@ -30,6 +30,16 @@ jobs:
           dotnet run "$RUNNER_TEMP/vectors.cs"
       - name: Test
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+      # Some CPUs with AVX-512 keep it off by default; asking for 512-bit vectors tests those paths there.
+      - name: Test with 512-bit vectors
+        if: runner.arch == 'X64'
+        shell: bash
+        run: |
+          dotnet run "$RUNNER_TEMP/vectors.cs"
+          dotnet test --project tests/BBTree.Tests -c Release --no-build
+        env:
+          DOTNET_TieredCompilation: 0
+          DOTNET_PreferredVectorBitWidth: 512
       - name: Test without AVX-512
         if: runner.arch == 'X64'
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
