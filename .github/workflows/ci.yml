@@ -24,6 +24,18 @@ jobs:
         run: dotnet build BBTree.slnx -c Release
       - name: Test
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+      # Fully optimized code without the vector paths the default run takes: emulated vectors and 128-bit-only hardware.
+      - name: Test without hardware intrinsics
+        run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+        env:
+          DOTNET_TieredCompilation: 0
+          DOTNET_EnableHWIntrinsic: 0
+      - name: Test without AVX2
+        if: runner.arch == 'X64'
+        run: dotnet test --project tests/BBTree.Tests -c Release --no-build
+        env:
+          DOTNET_TieredCompilation: 0
+          DOTNET_EnableAVX2: 0
       - name: Check format
         run: dotnet format whitespace BBTree.slnx --verify-no-changes
       - name: Pack
