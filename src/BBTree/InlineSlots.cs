@@ -185,12 +185,27 @@ internal static class InlineSlots<TKey, TSlots> where TSlots : struct, IInlineKe
         return less >> 1;
     }
 
-    /// <remarks>Sums the compare masks, each lane -1 or 0, in vectors: one horizontal sum, where a mask per vector would take a move and a count.</remarks>
+    /// <remarks>
+    /// Sums the compare masks, each lane -1 or 0, in vectors: one horizontal sum, where a mask per vector would take a move and a count.
+    /// With 512-bit vectors the slots fill three vectors, and each compare yields a mask register that counts in two instructions.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int CountBelowUInt32(ref TSlots slots, uint target)
     {
         if (target == 0) return 0;
         ref uint first = ref Unsafe.As<TSlots, uint>(ref slots);
+        if (Vector512.IsHardwareAccelerated)
+        {
+            Vector512<uint> targets = Vector512.Create(target);
+            int below512 = 0;
+            for (int i = 0; i < Capacity; i += Vector512<uint>.Count)
+            {
+                below512 += BitOperations.PopCount(Vector512.LessThan(Vector512.LoadUnsafe(ref first, (nuint)i), targets).ExtractMostSignificantBits());
+            }
+
+            return below512;
+        }
+
         Vector256<uint> below = Vector256.Create(target - 1);
         Vector256<uint> less = Vector256<uint>.Zero;
         for (int i = 0; i < Capacity; i += Vector256<uint>.Count)
@@ -202,11 +217,23 @@ internal static class InlineSlots<TKey, TSlots> where TSlots : struct, IInlineKe
         return (int)Vector256.Sum(less);
     }
 
-    /// <remarks>Counts only the vectors that hold keys: eight-byte slots fill 16 vectors when the node is full.</remarks>
+    /// <remarks>Counts only the vectors that hold keys: eight-byte slots fill 12 vectors, or six 512-bit ones, when the node is full.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int CountBelowUInt64(ref TSlots slots, int count, ulong target)
     {
         ref ulong first = ref Unsafe.As<TSlots, ulong>(ref slots);
+        if (Vector512.IsHardwareAccelerated)
+        {
+            Vector512<ulong> targets512 = Vector512.Create(target);
+            int below512 = 0;
+            for (int i = 0; i < count; i += Vector512<ulong>.Count)
+            {
+                below512 += BitOperations.PopCount(Vector512.LessThan(Vector512.LoadUnsafe(ref first, (nuint)i), targets512).ExtractMostSignificantBits());
+            }
+
+            return below512;
+        }
+
         Vector256<ulong> targets = Vector256.Create(target);
         int less = 0;
         for (int i = 0; i < count; i += Vector256<ulong>.Count)
