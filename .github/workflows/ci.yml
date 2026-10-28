@@ -22,10 +22,12 @@ jobs:
           global-json-file: global.json
       - name: Build
         run: dotnet build BBTree.slnx -c Release
-      - name: Report AVX-512
-        if: runner.os == 'Linux'
+      # The runtime can leave AVX-512 unused on hardware that has it, so ask it which vector paths the tests take.
+      - name: Report vector acceleration
+        shell: bash
         run: |
-          if grep -q avx512f /proc/cpuinfo; then echo "AVX-512 present: the default test run takes the 512-bit paths"; else echo "AVX-512 absent"; fi
+          echo 'using System.Runtime.Intrinsics; System.Console.WriteLine($"Vector512: {Vector512.IsHardwareAccelerated}, Vector256: {Vector256.IsHardwareAccelerated}, Vector128: {Vector128.IsHardwareAccelerated}");' > "$RUNNER_TEMP/vectors.cs"
+          dotnet run "$RUNNER_TEMP/vectors.cs"
       - name: Test
         run: dotnet test --project tests/BBTree.Tests -c Release --no-build
       - name: Test without AVX-512
