@@ -24,7 +24,14 @@ On the benchmark of the Rust crate, both maps are faster than the Rust crate in 
 dotnet add package BBTree
 ```
 
-The package targets .NET 10. It uses AVX2 where the CPU has it, and portable vector code elsewhere.
+The package targets .NET 10. It uses AVX-512 or AVX2 where the CPU has it, and portable vector code elsewhere.
+
+## What's new in 0.1.2
+
+- Fixes lost keys when hardware intrinsics are disabled ([#1](https://github.com/LukaszRozmej/BBTree/issues/1)): inserts
+  and removals now move node entries correctly without hardware vectors, and use 128-bit vectors on arm64 and on x64
+  without AVX2.
+- Searches inside a node compare 4- and 8-byte inline keys with 512-bit vectors where the runtime accelerates them.
 
 ## What's new in 0.1.1
 
